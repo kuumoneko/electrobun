@@ -520,6 +520,7 @@ void handleViewsSchemeRequest(ICoreWebView2WebResourceRequestedEventArgs* args,
                              const std::wstring& uri, 
                              uint32_t webviewId);
 std::string loadViewsFile(const std::string& path);
+std::string normalizeViewsRelativePath(const std::string& uriStr);
 std::string getMimeTypeForFile(const std::string& path);
 void updateActiveWebviewForMousePosition(ContainerView* container, POINT mousePos);
 
@@ -2037,6 +2038,11 @@ struct createNSWindowWithFrameAndStyleParams {
 };
 
 // Define a struct to store window data
+enum class ChromeStyle {
+    Default,
+    HiddenInset
+};
+
 typedef struct {
     uint32_t windowId;
     WindowCloseHandler closeHandler;
@@ -4011,6 +4017,11 @@ ELECTROBUN_EXPORT void stopEventLoop() {
     }
 
     std::cout << "[stopEventLoop] Initiating clean event loop exit" << std::endl;
+
+    // Release WebView2 environment synchronously while the process is alive
+    // so Chromium can clean up its window classes before DLL unload
+    g_environment.Reset();
+    g_envOptions.Reset();
 
     if (g_mainThreadId != 0) {
             PostThreadMessage(g_mainThreadId, WM_QUIT, 0, 0);
@@ -6404,6 +6415,15 @@ void handleViewsSchemeRequest(ICoreWebView2WebResourceRequestedEventArgs* args,
 }
 
 // Helper functions
+std::string normalizeViewsRelativePath(const std::string& uriStr) {
+    // Strip the "views://" prefix to get the relative file path
+    // e.g., "views://mainview/index.html" -> "mainview/index.html"
+    if (uriStr.length() > 8) {
+        return uriStr.substr(8);
+    }
+    return "index.html";
+}
+
 std::string loadViewsFile(const std::string& path) {
     // Get the current working directory instead of executable directory
     char currentDir[MAX_PATH];

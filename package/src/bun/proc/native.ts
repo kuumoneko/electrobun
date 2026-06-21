@@ -287,11 +287,7 @@ export const native = (() => {
 				args: [FFIType.function],
 				returns: FFIType.void,
 			},
-			testFFI2: {
-				args: [FFIType.function],
-				returns: FFIType.void,
-			},
-			// FFIFn: {
+				// FFIFn: {
 			//   args: [],
 			//   returns: FFIType.void
 			// },

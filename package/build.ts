@@ -202,7 +202,7 @@ async function setup() {
 		vendorBun(),
 		vendorZstd(),
 		vendorZig(),
-        vendorWebview2(),
+		vendorWebview2(),
 		vendorBsdiff(),
 	])
 	// await vendorBsdiff();
@@ -245,7 +245,6 @@ async function copyToDist() {
 		$`mkdir -p bin && cp src/cli/build/electrobun${binExt} bin/electrobun${binExt}`,
 		copyApiFiles(),
 		$`cp src/native/win/build/libNativeWrapper.dll dist/libNativeWrapper.dll`,
-		$`cp src/native/win/build/test.dll dist/test.dll`,
 		$`cp vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2Loader.dll dist/WebView2Loader.dll`,
 		$`cp src/mpv/mpv${binExt} dist/mpv${binExt}`,
 		$`cp src/mpv/libmpv.dll dist/libmpv.dll`,
@@ -383,10 +382,6 @@ function isNewer(source: string, target: string) {
 async function buildNative() {
 	const webview2Include = `./vendors/webview2/Microsoft.Web.WebView2/build/native/include`;
 	const webview2Lib = `./vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2LoaderStatic.lib`;
-	const testSource = "./src/native/win/test.cpp"
-	const testObj = "./src/native/win/build/test.obj"
-	const testLib = "./src/native/win/build/test.dll"
-
 	const smtcSource = "./smtc/smtc.cpp"
 	const smtcObj = "./smtc/build/smtc.obj"
 	const smtcLib = "./smtc/build/smtc.dll"
@@ -417,22 +412,6 @@ async function buildNative() {
 		//        res("")
 		// }
 		//  }),
-		new Promise(async (res) => {
-			if (isNewer(testSource, testLib) || isNewer(testSource, testObj)) {
-				console.log("test.cpp is changed! Building...")
-				try {
-					await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosrc/native/win/build/test.obj src/native/win/test.cpp`);
-					await runMsvcCommand(`link /DLL /OUT:src/native/win/build/test.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib runtimeobject.lib mfplat.lib mf.lib /IMPLIB:src/native/win/build/test.lib src/native/win/build/test.obj`);
-				} catch (e) {
-					console.error(e);
-				}
-				res("");
-			}
-			else {
-				console.log("test.cpp is unchanged! Skipping...")
-				res("");
-			}
-		}),
 		new Promise(async (res) => {
 			if (isNewer(smtcSource, smtcLib) || isNewer(smtcSource, smtcObj)) {
 				console.log("smtc.cpp is changed! Building...")
@@ -505,15 +484,6 @@ async function buildNative() {
 	// 		}
 	// 		else {
 	// 			console.log("Webview2 Library is unchanged! Skipping...")
-	// 		}
-	// 	},
-	// async	() => {
-	// 		if (isNewer(resolve(testInlcude), resolve(testLib))) {
-	// 			console.log("test.cpp is changed! Building...")
-	// 			await runMsvcCommand(`link /DLL /OUT:src/native/win/build/test.dll user32.lib ole32.lib shell32.lib kernel32.lib /IMPLIB:src/native/win/build/test.lib src/native/win/build/test.obj`);
-	// 		}
-	// 		else {
-	// 			console.log("test.cpp is unchanged! Skipping...")
 	// 		}
 	// 	},
 	// ])

@@ -1,4 +1,4 @@
-import { ffi, type MenuItemConfig, type Rectangle } from "../proc/native";
+import { ffi, type MenuItemConfig } from "../proc/native";
 import electrobunEventEmitter from "../events/eventEmitter";
 import { VIEWS_FOLDER } from "./Paths";
 import { join } from "path";
@@ -133,9 +133,9 @@ export class Tray {
 		this.createNativeTray();
 	}
 
-	getBounds(): Rectangle {
-		return ffi.request.getTrayBounds({ id: this.id });
-	}
+	// getBounds(): Rectangle {
+	// 	return ffi.request.getTrayBounds({ id: this.id });
+	// }
 
 	remove() {
 		console.log("Tray.remove() called for id:", this.id);

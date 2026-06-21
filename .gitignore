@@ -21,3 +21,8 @@ dist-*
 /package/src/bun/preload/.generated
 *.tar.gz
 settings.local.json
+/package/src/native/win/build
+/package/smtc/build
+/package/src/cli/build
+/package/src/extractor/zig-out
+/package/src/launcher/zig-out

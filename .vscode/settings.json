@@ -1,0 +1,10 @@
+{
+    "files.exclude": {
+        "**/vendors/": true,
+        "**/dist/": false,
+        "**/dist-win-x64/": false,
+        "**/assets/": true,
+        "**/{node_modules,scripts,prebuilt}/": true,
+        "**/{.npmignore,bun.lock,tsconfig.json,debug.js}": true
+    }
+}

@@ -18,7 +18,6 @@
 #include <windows.h>
 #include <atomic>
 #include "../shared/pending_resize_queue.h"
-#include "dawn/webgpu.h"
 #include <wrl.h>
 #include <WebView2.h>
 #include <WebView2EnvironmentOptions.h>
@@ -37,6 +36,8 @@
 #include <shlguid.h>   // For CLSID_FileOpenDialog
 #include <commdlg.h>   // For COMDLG_FILTERSPEC
 #include <dcomp.h>     // For DirectComposition
+#include <dxgi1_2.h>   // For DXGI 1.2 (CreateSwapChainForComposition)
+#include <d3d11.h>     // For D3D11 (DComp swap chain creation)
 #include <locale>      // For string conversion
 #include <codecvt>     // For UTF-8 to wide string conversion
 #include <d2d1.h>      // For Direct2D
@@ -59,8 +60,6 @@
 #include "../shared/download_event.h"
 #include "../shared/app_paths.h"
 #include "../shared/accelerator_parser.h"
-#include "../shared/chromium_flags.h"
-
 using namespace electrobun;
 
 // Simple ASAR reader implementation for Windows (no external dependency)
@@ -339,19 +338,6 @@ extern "C" __declspec(dllexport) void asar_close(void* archive) {
 #undef GetNextSibling
 #undef GetFirstChild
 
-// CEF includes - always include for runtime detection
-#include "include/cef_app.h"
-#include "include/cef_client.h"
-#include "include/cef_browser.h"
-#include "include/cef_command_line.h"
-#include "include/cef_scheme.h"
-#include "include/cef_context_menu_handler.h"
-#include "include/cef_permission_handler.h"
-#include "include/cef_dialog_handler.h"
-#include "include/cef_download_handler.h"
-#include "include/cef_task.h"
-#include "include/wrapper/cef_helpers.h"
-
 // Restore macro definitions
 #pragma pop_macro("GetFirstChild")
 #pragma pop_macro("GetNextSibling")
@@ -364,6 +350,8 @@ extern "C" __declspec(dllexport) void asar_close(void* archive) {
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dcomp.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -387,15 +375,12 @@ class WKWebView;
 class MyScriptMessageHandlerWithReply;
 class StatusItemTarget;
 
-// CEF function declarations
-ELECTROBUN_EXPORT bool isCEFAvailable();
-
 // Type definitions to match macOS types
 typedef double CGFloat;
 
 // Function pointer type definitions are in shared/callbacks.h
 // Platform-specific aliases
-typedef BOOL (*HandlePostMessageWin)(uint32_t webviewId, const char* message);
+typedef void (*HandlePostMessageWin)(uint32_t webviewId, const char* message);
 typedef void (*callAsyncJavascriptCompletionHandler)(const char *messageId, uint32_t webviewId, uint32_t hostWebviewId, const char *responseJSON);
 typedef SnapshotCallback zigSnapshotCallback;
 typedef StatusItemHandler ZigStatusItemHandler;
@@ -405,7 +390,6 @@ static std::map<HWND, std::unique_ptr<ContainerView>> g_containerViews;
 static GetMimeType g_getMimeType = nullptr;
 static GetHTMLForWebviewSync g_getHTMLForWebviewSync = nullptr;
 
-// Global variables for CEF cache path isolation
 static std::string g_electrobunChannel = "";
 static std::string g_electrobunIdentifier = "";
 static std::string g_electrobunName = "";
@@ -431,24 +415,11 @@ extern "C" ELECTROBUN_EXPORT void setWebviewHTMLContent(uint32_t webviewId, cons
 // Global mutex to serialize webview creation
 static std::mutex g_webviewCreationMutex;
 
-// Global map to store preload scripts by browser ID (needs to be early for load handler)
-static std::map<int, std::string> g_preloadScripts;
 
-// Global map to track browser ID to webview ID mapping (for CEF scheme handler)
-static std::map<int, uint32_t> browserToWebviewMap;
-static std::mutex browserMapMutex;
 
-// Global map to store CEFViews by container window handle (using void* to avoid forward declaration issues)
-static std::map<HWND, void*> g_cefViews;
 // Global map to store WebView2Views by container window handle (using void* to avoid forward declaration issues)
 static std::map<HWND, void*> g_webview2Views;
 
-// Global map to store pending CEF navigations for timing workaround - use browser ID instead of pointer
-static std::map<int, std::string> g_pendingCefNavigations;
-// Global map to store browser references by ID for safe access
-static std::map<int, CefRefPtr<CefBrowser>> g_cefBrowsers;
-// Global browser counter (moved from class static to global)
-static int g_browser_count = 0;
 // Global map to store pending URLs for async browser creation
 static std::map<HWND, std::string> g_pendingUrls;
 
@@ -482,754 +453,11 @@ static POINT g_initialWindowPos = {};
 // WebView positioning constants
 static const int OFFSCREEN_OFFSET = -20000;
 
-// Remote DevTools port
-static int g_remoteDebugPort = 9222;
-
-static bool IsPortAvailable(int port) {
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        return false;
-    }
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock == INVALID_SOCKET) {
-        WSACleanup();
-        return false;
-    }
-    int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-
-    sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons((u_short)port);
-
-    int result = bind(sock, (struct sockaddr*)&addr, sizeof(addr));
-    closesocket(sock);
-    WSACleanup();
-    return result == 0;
-}
-
-static int FindAvailableRemoteDebugPort(int startPort, int endPort) {
-    for (int port = startPort; port <= endPort; ++port) {
-        if (IsPortAvailable(port)) {
-            return port;
-        }
-    }
-    return 0;
-}
-
-// CEF global variables
-static bool g_cef_initialized = false;
-static CefRefPtr<CefApp> g_cef_app;
-static electrobun::ChromiumFlagConfig g_userChromiumFlags;
-static HANDLE g_job_object = nullptr;  // Job object to track all child processes
-
 // Quit/shutdown coordination
 static QuitRequestedHandler g_quitRequestedHandler = nullptr;
 static std::atomic<bool> g_shutdownComplete{false};
 static std::atomic<bool> g_eventLoopStopping{false};
 static DWORD g_mainThreadId = 0;
-
-// Simple CEF App class for minimal implementation
-// Hidden window message for CEF external message pump scheduling
-#define WM_CEF_SCHEDULE_WORK (WM_USER + 100)
-static HWND g_cefPumpWindow = NULL;
-
-class ElectrobunCefApp : public CefApp, public CefBrowserProcessHandler {
-public:
-    CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
-        return this;
-    }
-
-    void OnScheduleMessagePumpWork(int64_t delay_ms) override {
-        // Called by CEF when it needs CefDoMessageLoopWork to be called.
-        // With external_message_pump=true, CEF does NOT internally pump Windows messages,
-        // preventing it from stealing WebView2 messages.
-        if (g_cefPumpWindow) {
-            if (delay_ms <= 0) {
-                // Immediate work needed
-                ::PostMessage(g_cefPumpWindow, WM_CEF_SCHEDULE_WORK, 0, 0);
-            } else {
-                // Schedule work after delay
-                SetTimer(g_cefPumpWindow, 1, (UINT)delay_ms, nullptr);
-            }
-        }
-    }
-
-    void OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> command_line) override {
-        // Windows default flags — can be overridden via chromiumFlags in config
-        static const std::vector<electrobun::DefaultFlag> defaults = {
-            {"disable-web-security", ""},
-            {"disable-features=VizDisplayCompositor", ""},
-            {"remote-allow-origins", "*"},
-            {"allow-insecure-localhost", ""},
-        };
-        electrobun::applyDefaultFlags(defaults, g_userChromiumFlags.skip, command_line);
-
-        // Apply user-defined chromium flags from build.json
-        electrobun::applyChromiumFlags(g_userChromiumFlags, command_line);
-    }
-
-    void OnRegisterCustomSchemes(CefRawPtr<CefSchemeRegistrar> registrar) override {
-        // Register views:// scheme
-        registrar->AddCustomScheme("views",
-            CEF_SCHEME_OPTION_STANDARD |
-            CEF_SCHEME_OPTION_CORS_ENABLED |
-            CEF_SCHEME_OPTION_SECURE |
-            CEF_SCHEME_OPTION_CSP_BYPASSING |
-            CEF_SCHEME_OPTION_FETCH_ENABLED);
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunCefApp);
-};
-
-// Forward declaration for CEF client (needed for load handler)
-class ElectrobunCefClient;
-
-// CEF Load Handler for debugging navigation
-class ElectrobunLoadHandler : public CefLoadHandler {
-public:
-    uint32_t webview_id_ = 0;
-    WebviewEventHandler webview_event_handler_ = nullptr;
-    CefRefPtr<ElectrobunCefClient> client_ = nullptr;
-
-    ElectrobunLoadHandler() {}
-
-    void SetWebviewId(uint32_t id) { webview_id_ = id; }
-    void SetWebviewEventHandler(WebviewEventHandler handler) { webview_event_handler_ = handler; }
-    void SetClient(CefRefPtr<ElectrobunCefClient> client) { client_ = client; }
-
-    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) override;
-    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
-    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode errorCode, const CefString& errorText, const CefString& failedUrl) override {
-        std::cout << "[CEF] LoadError: " << static_cast<int>(errorCode)
-                  << " - " << errorText.ToString()
-                  << " for URL: " << failedUrl.ToString() << std::endl;
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunLoadHandler);
-};
-
-// Global map to store CEF clients for browser connection
-static std::map<HWND, CefRefPtr<ElectrobunCefClient>> g_cefClients;
-
-// Forward declaration for helper functions (defined after class definitions)
-void SetBrowserOnClient(CefRefPtr<ElectrobunCefClient> client, CefRefPtr<CefBrowser> browser);
-void SetBrowserOnCEFView(HWND parentWindow, CefRefPtr<CefBrowser> browser);
-void SetWebViewOnWebView2View(HWND containerWindow, void* webview);
-
-// CEF Life Span Handler for async browser creation
-class ElectrobunLifeSpanHandler : public CefLifeSpanHandler {
-public:
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
-        // Note: Browser setup is now handled synchronously during CreateBrowserSync
-    }
-
-    // DoClose is called when the browser window is about to close.
-    // Return true for OOPIFs to prevent CEF from closing the parent window.
-    // Return false only for the main/last browser when actually quitting the app.
-    bool DoClose(CefRefPtr<CefBrowser> browser) override {
-        std::cout << "[CEF] DoClose: Browser ID " << browser->GetIdentifier()
-                  << ", browser_count=" << g_browser_count << std::endl;
-
-        // For OOPIFs (when there are other browsers still open, or when we're not shutting down),
-        // return true to prevent CEF from sending WM_CLOSE to the parent window.
-        // We handle the actual close ourselves in remove() by calling CloseBrowser.
-        if (!g_eventLoopStopping.load()) {
-            std::cout << "[CEF] DoClose: Returning true to prevent parent window close" << std::endl;
-            return true;  // We'll handle the close - prevents CEF from closing parent
-        }
-
-        std::cout << "[CEF] DoClose: Returning false - app is shutting down" << std::endl;
-        return false;
-    }
-
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        std::cout << "[CEF] OnBeforeClose: Browser ID " << browser->GetIdentifier() << " closing" << std::endl;
-
-        // Remove browser from global tracking
-        g_cefBrowsers.erase(browser->GetIdentifier());
-        {
-            std::lock_guard<std::mutex> lock(browserMapMutex);
-            browserToWebviewMap.erase(browser->GetIdentifier());
-        }
-        g_browser_count--;
-
-        std::cout << "[CEF] Remaining browsers: " << g_browser_count << std::endl;
-
-        // Note: Do NOT quit the message loop here when browser count reaches 0.
-        // OOPIFs are CEF browsers that can be removed while the main window stays open.
-        // Window/app closing is handled separately by the window close handlers.
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunLifeSpanHandler);
-};
-
-// Forward declaration for DevTools callback
-class ElectrobunCefClient;
-typedef void (*RemoteDevToolsClosedCallback)(void* ctx, int target_id);
-void RemoteDevToolsClosed(void* ctx, int target_id);
-
-// Lightweight CefClient for the DevTools browser window
-class RemoteDevToolsClient : public CefClient, public CefLifeSpanHandler {
-public:
-    RemoteDevToolsClient(RemoteDevToolsClosedCallback callback, void* ctx, int target_id)
-        : callback_(callback), ctx_(ctx), target_id_(target_id) {}
-
-    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
-        return this;
-    }
-
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        if (callback_) {
-            callback_(ctx_, target_id_);
-        }
-    }
-
-private:
-    RemoteDevToolsClosedCallback callback_ = nullptr;
-    void* ctx_ = nullptr;
-    int target_id_ = 0;
-    IMPLEMENT_REFCOUNTING(RemoteDevToolsClient);
-};
-
-// DevTools window class and WndProc
-struct DevToolsWindowContext {
-    RemoteDevToolsClosedCallback close_callback = nullptr;
-    void* ctx = nullptr;
-    int target_id = 0;
-    CefRefPtr<CefBrowser> browser;
-};
-
-static std::once_flag g_devtoolsClassRegistered;
-static const char* DEVTOOLS_WINDOW_CLASS = "ElectrobunDevToolsClass";
-
-static LRESULT CALLBACK DevToolsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    DevToolsWindowContext* dtCtx = nullptr;
-
-    if (msg == WM_NCCREATE) {
-        CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;
-        dtCtx = (DevToolsWindowContext*)cs->lpCreateParams;
-        SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)dtCtx);
-    } else {
-        dtCtx = (DevToolsWindowContext*)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-    }
-
-    switch (msg) {
-        case WM_CLOSE:
-            // Hide the window instead of destroying it to avoid CEF teardown issues
-            ShowWindow(hwnd, SW_HIDE);
-            if (dtCtx && dtCtx->close_callback) {
-                dtCtx->close_callback(dtCtx->ctx, dtCtx->target_id);
-            }
-            return 0;
-
-        case WM_SIZE:
-            if (dtCtx && dtCtx->browser) {
-                HWND browserHwnd = dtCtx->browser->GetHost()->GetWindowHandle();
-                if (browserHwnd) {
-                    RECT rect;
-                    GetClientRect(hwnd, &rect);
-                    SetWindowPos(browserHwnd, nullptr, 0, 0,
-                                 rect.right - rect.left, rect.bottom - rect.top,
-                                 SWP_NOZORDER);
-                }
-            }
-            break;
-
-        case WM_DESTROY:
-            return 0;
-    }
-
-    return DefWindowProcA(hwnd, msg, wParam, lParam);
-}
-
-static void EnsureDevToolsWindowClassRegistered() {
-    std::call_once(g_devtoolsClassRegistered, []() {
-        WNDCLASSA wc = {};
-        wc.lpfnWndProc = DevToolsWndProc;
-        wc.hInstance = GetModuleHandle(NULL);
-        wc.lpszClassName = DEVTOOLS_WINDOW_CLASS;
-        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.style = CS_HREDRAW | CS_VREDRAW;
-        RegisterClassA(&wc);
-    });
-}
-
-// Forward declarations for functions defined later in the file
-std::string loadViewsFile(const std::string& path);
-std::string getMimeTypeForFile(const std::string& path);
-
-// CEF Resource Handler for views:// scheme (based on Mac implementation)
-class ElectrobunSchemeHandler : public CefResourceHandler {
-public:
-    ElectrobunSchemeHandler(uint32_t webviewId)
-        : webviewId_(webviewId), offset_(0), hasResponse_(false) {}
-
-    bool Open(CefRefPtr<CefRequest> request, bool& handle_request, CefRefPtr<CefCallback> callback) override {
-        handle_request = true;
-
-        std::string url = request->GetURL();
-        std::string path = url.substr(8); // Remove "views://" prefix
-        if (path.empty()) path = "index.html";
-
-        std::string content;
-        // Check for internal/index.html (inline HTML content)
-        if (path == "internal/index.html") {
-            const char* htmlContent = getWebviewHTMLContent(webviewId_);
-            if (htmlContent && strlen(htmlContent) > 0) {
-                content = std::string(htmlContent);
-                free((void*)htmlContent);
-            } else {
-                content = "<html><body><h1>No content set</h1></body></html>";
-            }
-        } else {
-            content = loadViewsFile(path);
-        }
-        mimeType_ = getMimeTypeForFile(path);
-
-        if (!content.empty()) {
-            responseData_.assign(content.begin(), content.end());
-            hasResponse_ = true;
-        } else {
-            hasResponse_ = false;
-        }
-
-        return hasResponse_;
-    }
-
-    void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t& response_length, CefString& redirectUrl) override {
-        response->SetStatus(200);
-        response->SetMimeType(mimeType_);
-        response_length = static_cast<int64_t>(responseData_.size());
-    }
-
-    bool Read(void* data_out, int bytes_to_read, int& bytes_read, CefRefPtr<CefResourceReadCallback> callback) override {
-        bytes_read = 0;
-        if (!hasResponse_ || offset_ >= responseData_.size()) {
-            return false;
-        }
-        size_t remaining = responseData_.size() - offset_;
-        bytes_read = (bytes_to_read < static_cast<int>(remaining)) ? 
-                     bytes_to_read : static_cast<int>(remaining);
-        memcpy(data_out, responseData_.data() + offset_, bytes_read);
-        offset_ += bytes_read;
-        return true;
-    }
-
-    void Cancel() override {}
-
-private:
-    uint32_t webviewId_;
-    std::string mimeType_;
-    std::vector<char> responseData_;
-    bool hasResponse_;
-    size_t offset_;
-    IMPLEMENT_REFCOUNTING(ElectrobunSchemeHandler);
-};
-
-// CEF Scheme Handler Factory
-class ElectrobunSchemeHandlerFactory : public CefSchemeHandlerFactory {
-public:
-    CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser> browser,
-                                       CefRefPtr<CefFrame> frame,
-                                       const CefString& scheme_name,
-                                       CefRefPtr<CefRequest> request) override {
-        // Get webview ID from browser ID
-        uint32_t webviewId = 0;
-        if (browser) {
-            std::lock_guard<std::mutex> lock(browserMapMutex);
-            int browserId = browser->GetIdentifier();
-            auto it = browserToWebviewMap.find(browserId);
-            if (it != browserToWebviewMap.end()) {
-                webviewId = it->second;
-            }
-        }
-        return new ElectrobunSchemeHandler(webviewId);
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunSchemeHandlerFactory);
-};
-
-// CEF Response Filter for script injection
-class ElectrobunResponseFilter : public CefResponseFilter {
-public:
-    ElectrobunResponseFilter(const std::string& script) : script_(script) {}
-
-    bool InitFilter() override {
-        return true;
-    }
-
-    FilterStatus Filter(void* data_in, size_t data_in_size, size_t& data_in_read,
-                       void* data_out, size_t data_out_size, size_t& data_out_written) override {
-        // Read all input data
-        if (data_in_size > 0) {
-            data_buffer_.append(static_cast<char*>(data_in), data_in_size);
-            data_in_read = data_in_size;
-        } else {
-            data_in_read = 0;
-        }
-        
-        // If no input data (end of stream), process the accumulated data
-        if (data_in_size == 0 && !processed_) {
-            ProcessAccumulatedData();
-            processed_ = true;
-        }
-        
-        // Output processed data
-        data_out_written = 0;
-        if (processed_ && output_offset_ < processed_data_.size()) {
-            size_t remaining = processed_data_.size() - output_offset_;
-            size_t copy_size = (data_out_size < remaining) ? data_out_size : remaining;
-            memcpy(data_out, processed_data_.data() + output_offset_, copy_size);
-            output_offset_ += copy_size;
-            data_out_written = copy_size;
-        }
-        
-        // Return status based on whether we have more data to output
-        if (data_in_size == 0 && output_offset_ >= processed_data_.size()) {
-            return RESPONSE_FILTER_DONE;
-        } else {
-            return RESPONSE_FILTER_NEED_MORE_DATA;
-        }
-    }
-
-    void ProcessAccumulatedData() {
-        // Process accumulated data and inject script
-        processed_data_ = data_buffer_;
-
-        // Look for <head> tag and inject script right after it (as first element in head)
-        // This ensures preload script executes before any other scripts in the page
-        size_t head_pos = processed_data_.find("<head>");
-        if (head_pos != std::string::npos && !script_.empty()) {
-            // Insert after the <head> tag (head_pos + 6 to skip past "<head>")
-            size_t insert_pos = head_pos + 6;
-            std::string script_tag = "<script>" + script_ + "</script>";
-            processed_data_.insert(insert_pos, script_tag);
-        } else {
-            // Fallback: try case-insensitive search for <head with attributes
-            size_t head_start = processed_data_.find("<head");
-            if (head_start != std::string::npos && !script_.empty()) {
-                // Find the end of the opening <head...> tag
-                size_t head_end = processed_data_.find(">", head_start);
-                if (head_end != std::string::npos) {
-                    size_t insert_pos = head_end + 1;
-                    std::string script_tag = "<script>" + script_ + "</script>";
-                    processed_data_.insert(insert_pos, script_tag);
-                }
-            }
-        }
-    }
-
-private:
-    std::string script_;
-    std::string data_buffer_;
-    std::string processed_data_;
-    size_t output_offset_ = 0;
-    bool processed_ = false;
-    IMPLEMENT_REFCOUNTING(ElectrobunResponseFilter);
-};
-
-// Forward declaration for ElectrobunCefClient
-class ElectrobunCefClient;
-
-// CEF Resource Request Handler to inject preload scripts via response filter
-class ElectrobunResourceRequestHandler : public CefResourceRequestHandler {
-public:
-    CefRefPtr<ElectrobunCefClient> client_ = nullptr;
-
-    ElectrobunResourceRequestHandler(CefRefPtr<ElectrobunCefClient> client) : client_(client) {}
-
-    // Response filter to inject preload scripts into HTML before parsing
-    // This ensures scripts execute BEFORE any page JavaScript
-    CefRefPtr<CefResponseFilter> GetResourceResponseFilter(
-        CefRefPtr<CefBrowser> browser,
-        CefRefPtr<CefFrame> frame,
-        CefRefPtr<CefRequest> request,
-        CefRefPtr<CefResponse> response) override;
-
-    IMPLEMENT_REFCOUNTING(ElectrobunResourceRequestHandler);
-};
-
-// CEF Request Handler for views:// scheme support
-class ElectrobunRequestHandler : public CefRequestHandler {
-public:
-    uint32_t webview_id_ = 0;
-    WebviewEventHandler webview_event_handler_ = nullptr;
-    AbstractView* abstract_view_ = nullptr;
-    CefRefPtr<ElectrobunCefClient> client_ = nullptr;
-
-    // Static debounce timestamp for ctrl+click handling
-    static double lastCtrlClickTime;
-
-    ElectrobunRequestHandler() {}
-
-    void SetWebviewId(uint32_t id) { webview_id_ = id; }
-    void SetWebviewEventHandler(WebviewEventHandler handler) { webview_event_handler_ = handler; }
-    void SetAbstractView(AbstractView* view) { abstract_view_ = view; }
-    void SetClient(CefRefPtr<ElectrobunCefClient> client) { client_ = client; }
-
-    // Return resource request handler to enable response filtering
-    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
-        CefRefPtr<CefBrowser> browser,
-        CefRefPtr<CefFrame> frame,
-        CefRefPtr<CefRequest> request,
-        bool is_navigation,
-        bool is_download,
-        const CefString& request_initiator,
-        bool& disable_default_handling) override {
-
-        if (client_) {
-            return new ElectrobunResourceRequestHandler(client_);
-        }
-        return nullptr;
-    }
-
-    // Handle navigation requests with Ctrl+click detection
-    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
-                       CefRefPtr<CefFrame> frame,
-                       CefRefPtr<CefRequest> request,
-                       bool user_gesture,
-                       bool is_redirect) override {
-        std::string url = request->GetURL().ToString();
-
-        // Check if Ctrl key is held
-        SHORT ctrlState = GetKeyState(VK_CONTROL);
-        bool isCtrlHeld = (ctrlState & 0x8000) != 0;
-
-        printf("[CEF OnBeforeBrowse] url=%s user_gesture=%d is_redirect=%d ctrlState=0x%04X isCtrlHeld=%d hasHandler=%d webviewId=%u\n",
-               url.c_str(), user_gesture, is_redirect, ctrlState, isCtrlHeld, webview_event_handler_ != nullptr, webview_id_);
-
-        if (isCtrlHeld && !is_redirect && webview_event_handler_) {
-            // Debounce: ignore ctrl+click navigations within 500ms
-            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count() / 1000.0;
-
-            printf("[CEF OnBeforeBrowse] Ctrl held! now=%.3f lastTime=%.3f diff=%.3f\n",
-                   now, lastCtrlClickTime, now - lastCtrlClickTime);
-
-            if (now - lastCtrlClickTime >= 0.5) {
-                lastCtrlClickTime = now;
-
-                // Escape URL for JSON
-                std::string escapedUrl;
-                for (char c : url) {
-                    switch (c) {
-                        case '"': escapedUrl += "\\\""; break;
-                        case '\\': escapedUrl += "\\\\"; break;
-                        default: escapedUrl += c; break;
-                    }
-                }
-
-                std::string eventData = "{\"url\":\"" + escapedUrl +
-                                       "\",\"isCmdClick\":true,\"modifierFlags\":0}";
-                printf("[CEF OnBeforeBrowse] Firing new-window-open: %s\n", eventData.c_str());
-                // Use strdup to create persistent copies for the FFI callback
-                webview_event_handler_(webview_id_, _strdup("new-window-open"), _strdup(eventData.c_str()));
-                return true;  // Cancel navigation
-            } else {
-                printf("[CEF OnBeforeBrowse] Debounced - too soon after last ctrl+click\n");
-            }
-        }
-
-        // Check navigation rules synchronously from native-stored rules
-        // Navigation is allowed by default
-        bool shouldAllow = true;
-        if (abstract_view_) {
-            shouldAllow = checkNavigationRules(abstract_view_, url);
-        }
-
-        // Fire will-navigate event with allowed status
-        if (webview_event_handler_) {
-            // Escape URL for JSON
-            std::string escapedUrl;
-            for (char c : url) {
-                switch (c) {
-                    case '"': escapedUrl += "\\\""; break;
-                    case '\\': escapedUrl += "\\\\"; break;
-                    default: escapedUrl += c; break;
-                }
-            }
-            std::string eventData = "{\"url\":\"" + escapedUrl + "\",\"allowed\":" +
-                                   (shouldAllow ? "true" : "false") + "}";
-            webview_event_handler_(webview_id_, _strdup("will-navigate"), _strdup(eventData.c_str()));
-        }
-
-        return !shouldAllow;  // Return true to cancel navigation
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunRequestHandler);
-};
-
-// Initialize static debounce timestamp
-double ElectrobunRequestHandler::lastCtrlClickTime = 0;
-
-// CEF Context Menu Handler for devtools support
-class ElectrobunContextMenuHandler : public CefContextMenuHandler {
-public:
-    ElectrobunContextMenuHandler() {}
-    
-    void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
-                           CefRefPtr<CefFrame> frame,
-                           CefRefPtr<CefContextMenuParams> params,
-                           CefRefPtr<CefMenuModel> model) override {
-        // Add "Inspect Element" menu item
-        model->AddSeparator();
-        model->AddItem(26501, "Inspect Element");
-    }
-    
-    // Defined out-of-line after ElectrobunCefClient (needs full class definition)
-    bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
-                            CefRefPtr<CefFrame> frame,
-                            CefRefPtr<CefContextMenuParams> params,
-                            int command_id,
-                            EventFlags event_flags) override;
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunContextMenuHandler);
-};
-
-// CEF Permission Handler for user media and other permissions
-class ElectrobunPermissionHandler : public CefPermissionHandler {
-public:
-    bool OnRequestMediaAccessPermission(
-        CefRefPtr<CefBrowser> browser,
-        CefRefPtr<CefFrame> frame,
-        const CefString& requesting_origin,
-        uint32_t requested_permissions,
-        CefRefPtr<CefMediaAccessCallback> callback) override {
-        
-        std::string origin = requesting_origin.ToString();
-        printf("CEF: Media access permission requested for %s (permissions: %u)\n", origin.c_str(), requested_permissions);
-        
-        // Check cache first
-        PermissionStatus cachedStatus = getPermissionFromCache(origin, PermissionType::USER_MEDIA);
-        
-        if (cachedStatus == PermissionStatus::ALLOWED) {
-            printf("CEF: Using cached permission: User previously allowed media access for %s\n", origin.c_str());
-            callback->Continue(requested_permissions); // Allow all requested permissions
-            return true;
-        } else if (cachedStatus == PermissionStatus::DENIED) {
-            printf("CEF: Using cached permission: User previously blocked media access for %s\n", origin.c_str());
-            callback->Cancel();
-            return true;
-        }
-        
-        // No cached permission, show dialog
-        printf("CEF: No cached permission found for %s, showing dialog\n", origin.c_str());
-        
-        // Show Windows message box
-        std::string message = "This page wants to access your camera and/or microphone.\n\nDo you want to allow this?";
-        std::string title = "Camera & Microphone Access";
-        
-        int result = MessageBoxA(
-            nullptr,
-            message.c_str(),
-            title.c_str(),
-            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
-        );
-        
-        // Handle response and cache the decision
-        if (result == IDYES) {
-            callback->Continue(requested_permissions); // Allow all requested permissions
-            cachePermission(origin, PermissionType::USER_MEDIA, PermissionStatus::ALLOWED);
-            printf("CEF: User allowed media access for %s (cached)\n", origin.c_str());
-        } else {
-            callback->Cancel();
-            cachePermission(origin, PermissionType::USER_MEDIA, PermissionStatus::DENIED);
-            printf("CEF: User blocked media access for %s (cached)\n", origin.c_str());
-        }
-        
-        return true; // We handled the permission request
-    }
-    
-    bool OnShowPermissionPrompt(
-        CefRefPtr<CefBrowser> browser,
-        uint64_t prompt_id,
-        const CefString& requesting_origin,
-        uint32_t requested_permissions,
-        CefRefPtr<CefPermissionPromptCallback> callback) override {
-        
-        std::string origin = requesting_origin.ToString();
-        printf("CEF: Permission prompt requested for %s (permissions: %u)\n", origin.c_str(), requested_permissions);
-        
-        // Handle different permission types
-        PermissionType permType = PermissionType::OTHER;
-        std::string message = "This page is requesting additional permissions.\n\nDo you want to allow this?";
-        std::string title = "Permission Request";
-        
-        // Check for specific permission types
-        if (requested_permissions & CEF_PERMISSION_TYPE_CAMERA_STREAM ||
-            requested_permissions & CEF_PERMISSION_TYPE_MIC_STREAM) {
-            permType = PermissionType::USER_MEDIA;
-            message = "This page wants to access your camera and/or microphone.\n\nDo you want to allow this?";
-            title = "Camera & Microphone Access";
-        } else if (requested_permissions & CEF_PERMISSION_TYPE_GEOLOCATION) {
-            permType = PermissionType::GEOLOCATION;
-            message = "This page wants to access your location.\n\nDo you want to allow this?";
-            title = "Location Access";
-        } else if (requested_permissions & CEF_PERMISSION_TYPE_NOTIFICATIONS) {
-            permType = PermissionType::NOTIFICATIONS;
-            message = "This page wants to show notifications.\n\nDo you want to allow this?";
-            title = "Notification Permission";
-        }
-        
-        // Check cache first
-        PermissionStatus cachedStatus = getPermissionFromCache(origin, permType);
-        
-        if (cachedStatus == PermissionStatus::ALLOWED) {
-            printf("CEF: Using cached permission: User previously allowed %s for %s\n", title.c_str(), origin.c_str());
-            callback->Continue(CEF_PERMISSION_RESULT_ACCEPT);
-            return true;
-        } else if (cachedStatus == PermissionStatus::DENIED) {
-            printf("CEF: Using cached permission: User previously blocked %s for %s\n", title.c_str(), origin.c_str());
-            callback->Continue(CEF_PERMISSION_RESULT_DENY);
-            return true;
-        }
-        
-        // No cached permission, show dialog
-        printf("CEF: No cached permission found for %s, showing dialog\n", origin.c_str());
-        
-        // Show Windows message box
-        int result = MessageBoxA(
-            nullptr,
-            message.c_str(),
-            title.c_str(),
-            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
-        );
-        
-        // Handle response and cache the decision
-        if (result == IDYES) {
-            callback->Continue(CEF_PERMISSION_RESULT_ACCEPT);
-            cachePermission(origin, permType, PermissionStatus::ALLOWED);
-            printf("CEF: User allowed %s for %s (cached)\n", title.c_str(), origin.c_str());
-        } else {
-            callback->Continue(CEF_PERMISSION_RESULT_DENY);
-            cachePermission(origin, permType, PermissionStatus::DENIED);
-            printf("CEF: User blocked %s for %s (cached)\n", title.c_str(), origin.c_str());
-        }
-        
-        return true; // We handled the permission request
-    }
-    
-    void OnDismissPermissionPrompt(
-        CefRefPtr<CefBrowser> browser,
-        uint64_t prompt_id,
-        cef_permission_request_result_t result) override {
-        
-        printf("CEF: Permission prompt %I64u dismissed with result %d\n", prompt_id, result);
-        // Optional: Handle prompt dismissal if needed
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunPermissionHandler);
-};
 
 // Helper functions for string conversion
 std::wstring StringToWString(const std::string& str) {
@@ -1274,1125 +502,6 @@ std::string WStringToString(const std::wstring& wstr) {
     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &str[0], sizeRequired, nullptr, nullptr);
     str.pop_back(); // Remove null terminator
     return str;
-}
-
-// CEF Dialog Handler for file dialogs
-class ElectrobunDialogHandler : public CefDialogHandler {
-public:
-    bool OnFileDialog(CefRefPtr<CefBrowser> browser,
-                      FileDialogMode mode,
-                      const CefString& title,
-                      const CefString& default_file_path,
-                      const std::vector<CefString>& accept_filters,
-                      const std::vector<CefString>& accept_extensions,
-                      const std::vector<CefString>& accept_descriptions,
-                      CefRefPtr<CefFileDialogCallback> callback) override {
-        
-        printf("CEF Windows: File dialog requested - mode: %d\n", static_cast<int>(mode));
-        
-        // Run file dialog on main thread using Windows native dialog
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        if (FAILED(hr)) {
-            callback->Continue(std::vector<CefString>());
-            return true;
-        }
-        
-        IFileOpenDialog* pFileDialog = nullptr;
-        hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_IFileOpenDialog, (void**)&pFileDialog);
-        if (FAILED(hr)) {
-            CoUninitialize();
-            callback->Continue(std::vector<CefString>());
-            return true;
-        }
-        
-        // Set dialog options based on mode
-        DWORD dwFlags = 0;
-        pFileDialog->GetOptions(&dwFlags);
-        
-        if (mode == FILE_DIALOG_OPEN_MULTIPLE) {
-            dwFlags |= FOS_ALLOWMULTISELECT;
-        } else if (mode == FILE_DIALOG_OPEN_FOLDER) {
-            dwFlags |= FOS_PICKFOLDERS;
-        }
-        
-        pFileDialog->SetOptions(dwFlags);
-        
-        // Set title if provided
-        if (!title.empty()) {
-            std::wstring wTitle = StringToWString(title.ToString());
-            pFileDialog->SetTitle(wTitle.c_str());
-        }
-        
-        // Set default file path if provided
-        if (!default_file_path.empty()) {
-            std::wstring wPath = StringToWString(default_file_path.ToString());
-            
-            IShellItem* pDefaultFolder = nullptr;
-            hr = SHCreateItemFromParsingName(wPath.c_str(), nullptr, IID_IShellItem, (void**)&pDefaultFolder);
-            if (SUCCEEDED(hr)) {
-                if (mode == FILE_DIALOG_SAVE) {
-                    pFileDialog->SetDefaultFolder(pDefaultFolder);
-                } else {
-                    pFileDialog->SetFolder(pDefaultFolder);
-                }
-                pDefaultFolder->Release();
-            }
-        }
-        
-        // Set file filters
-        if (!accept_filters.empty()) {
-            std::vector<COMDLG_FILTERSPEC> filterSpecs;
-            std::vector<std::wstring> filterNames;
-            std::vector<std::wstring> filterPatterns;
-            
-            for (const auto& filter : accept_filters) {
-                std::wstring wFilter = StringToWString(filter.ToString());
-                
-                if (wFilter.find(L".") != 0 && wFilter != L"*" && wFilter != L"*.*") {
-                    wFilter = L"." + wFilter;
-                }
-                
-                std::wstring pattern = (wFilter == L"*" || wFilter == L"*.*") ? L"*.*" : L"*" + wFilter;
-                std::wstring name = (wFilter == L"*" || wFilter == L"*.*") ? L"All files" : wFilter.substr(1) + L" files";
-                
-                filterNames.push_back(name);
-                filterPatterns.push_back(pattern);
-                
-                COMDLG_FILTERSPEC spec;
-                spec.pszName = filterNames.back().c_str();
-                spec.pszSpec = filterPatterns.back().c_str();
-                filterSpecs.push_back(spec);
-            }
-            
-            pFileDialog->SetFileTypes(static_cast<UINT>(filterSpecs.size()), filterSpecs.data());
-        }
-        
-        // Show the dialog
-        hr = pFileDialog->Show(nullptr);
-        
-        std::vector<CefString> file_paths;
-        if (SUCCEEDED(hr)) {
-            if (mode == FILE_DIALOG_OPEN_MULTIPLE) {
-                IShellItemArray* pShellItemArray = nullptr;
-                hr = pFileDialog->GetResults(&pShellItemArray);
-                if (SUCCEEDED(hr)) {
-                    DWORD count = 0;
-                    pShellItemArray->GetCount(&count);
-                    
-                    for (DWORD i = 0; i < count; i++) {
-                        IShellItem* pShellItem = nullptr;
-                        hr = pShellItemArray->GetItemAt(i, &pShellItem);
-                        if (SUCCEEDED(hr)) {
-                            PWSTR pszFilePath = nullptr;
-                            hr = pShellItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
-                            if (SUCCEEDED(hr)) {
-                                // Convert wide string to regular string
-                                std::string path = WStringToString(pszFilePath);
-                                file_paths.push_back(path);
-                                CoTaskMemFree(pszFilePath);
-                            }
-                            pShellItem->Release();
-                        }
-                    }
-                    pShellItemArray->Release();
-                }
-            } else {
-                IShellItem* pShellItem = nullptr;
-                hr = pFileDialog->GetResult(&pShellItem);
-                if (SUCCEEDED(hr)) {
-                    PWSTR pszFilePath = nullptr;
-                    hr = pShellItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
-                    if (SUCCEEDED(hr)) {
-                        // Convert wide string to regular string
-                        std::string path = WStringToString(pszFilePath);
-                        file_paths.push_back(path);
-                        CoTaskMemFree(pszFilePath);
-                    }
-                    pShellItem->Release();
-                }
-            }
-        }
-        
-        pFileDialog->Release();
-        CoUninitialize();
-        
-        // Call the callback with results
-        callback->Continue(file_paths);
-        
-        printf("CEF Windows: File dialog completed with %zu files selected\n", file_paths.size());
-        return true; // We handled the dialog
-    }
-    
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunDialogHandler);
-};
-
-// CEF Download handler for Windows
-class ElectrobunDownloadHandler : public CefDownloadHandler {
-public:
-    ElectrobunDownloadHandler() {}
-
-    bool OnBeforeDownload(CefRefPtr<CefBrowser> browser,
-                          CefRefPtr<CefDownloadItem> download_item,
-                          const CefString& suggested_name,
-                          CefRefPtr<CefBeforeDownloadCallback> callback) override {
-        printf("CEF Windows: OnBeforeDownload for %s\n", suggested_name.ToString().c_str());
-
-        // Get the Downloads folder using Windows API
-        wchar_t* downloadsPath = nullptr;
-        HRESULT hr = SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &downloadsPath);
-
-        if (SUCCEEDED(hr) && downloadsPath) {
-            // Convert suggested name to wide string
-            std::string suggestedStr = suggested_name.ToString();
-            std::wstring suggestedNameW(suggestedStr.begin(), suggestedStr.end());
-
-            // Build the full destination path
-            std::wstring destPath = downloadsPath;
-            destPath += L"\\";
-            destPath += suggestedNameW;
-
-            // Handle duplicate filenames
-            std::wstring basePath = destPath;
-            std::wstring extension;
-            size_t dotPos = destPath.find_last_of(L'.');
-            size_t slashPos = destPath.find_last_of(L"\\/");
-            if (dotPos != std::wstring::npos && (slashPos == std::wstring::npos || dotPos > slashPos)) {
-                basePath = destPath.substr(0, dotPos);
-                extension = destPath.substr(dotPos);
-            }
-
-            int counter = 1;
-            while (GetFileAttributesW(destPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                destPath = basePath + L" (" + std::to_wstring(counter) + L")" + extension;
-                counter++;
-            }
-
-            // Convert wide string back to UTF-8 for CEF
-            int size = WideCharToMultiByte(CP_UTF8, 0, destPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
-            std::string utf8Path(size - 1, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, destPath.c_str(), -1, &utf8Path[0], size, nullptr, nullptr);
-
-            printf("CEF Windows: Downloading to %s\n", utf8Path.c_str());
-
-            // Continue the download to the specified path without showing a dialog
-            callback->Continue(utf8Path, false);
-
-            CoTaskMemFree(downloadsPath);
-        } else {
-            printf("CEF Windows: Could not get Downloads folder, using default behavior\n");
-            callback->Continue("", false);
-        }
-
-        return true;  // We handled it
-    }
-
-    void OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
-                           CefRefPtr<CefDownloadItem> download_item,
-                           CefRefPtr<CefDownloadItemCallback> callback) override {
-        if (download_item->IsComplete()) {
-            printf("CEF Windows: Download complete - %s\n", download_item->GetFullPath().ToString().c_str());
-        } else if (download_item->IsCanceled()) {
-            printf("CEF Windows: Download canceled\n");
-        } else if (download_item->IsInProgress()) {
-            int percent = download_item->GetPercentComplete();
-            if (percent >= 0 && percent % 25 == 0) {  // Log at 0%, 25%, 50%, 75%, 100%
-                printf("CEF Windows: Download progress %d%%\n", percent);
-            }
-        }
-    }
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunDownloadHandler);
-};
-
-// OSR (Off-Screen Rendering) Window for transparent CEF windows
-// Renders directly to the parent layered window
-class OSRWindow {
-public:
-    OSRWindow(HWND parent, int x, int y, int width, int height)
-        : parent_(parent), pixel_buffer_(nullptr),
-          buffer_width_(0), buffer_height_(0), buffer_size_(0),
-          browser_(nullptr) {
-    }
-
-    ~OSRWindow() {
-        if (pixel_buffer_) {
-            free(pixel_buffer_);
-            pixel_buffer_ = nullptr;
-        }
-    }
-
-    void SetBrowser(CefRefPtr<CefBrowser> browser) {
-        browser_ = browser;
-    }
-
-    void UpdateBuffer(const void* buffer, int width, int height) {
-        if (!buffer || width <= 0 || height <= 0 || !parent_) {
-            return;
-        }
-
-        size_t required_size = (size_t)width * (size_t)height * 4; // BGRA
-
-        // Reallocate buffer if needed
-        if (buffer_size_ < required_size) {
-            if (pixel_buffer_) {
-                free(pixel_buffer_);
-            }
-            pixel_buffer_ = (unsigned char*)malloc(required_size);
-            if (!pixel_buffer_) {
-                buffer_size_ = 0;
-                return;
-            }
-            buffer_size_ = required_size;
-        }
-
-        memcpy(pixel_buffer_, buffer, required_size);
-        buffer_width_ = width;
-        buffer_height_ = height;
-
-        UpdateLayeredWindow();
-    }
-
-    void UpdateLayeredWindow() {
-        if (!parent_ || !pixel_buffer_ || buffer_width_ == 0 || buffer_height_ == 0) {
-            return;
-        }
-
-        HDC hdc = GetDC(NULL);
-        HDC memDC = CreateCompatibleDC(hdc);
-
-        BITMAPINFO bmi = {};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = buffer_width_;
-        bmi.bmiHeader.biHeight = -buffer_height_; // Top-down DIB
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
-
-        void* bits = nullptr;
-        HBITMAP hBitmap = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
-
-        if (hBitmap && bits) {
-            // Copy pixel buffer to DIB section
-            memcpy(bits, pixel_buffer_, buffer_size_);
-
-            HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, hBitmap);
-
-            POINT ptSrc = {0, 0};
-            SIZE size = {buffer_width_, buffer_height_};
-            BLENDFUNCTION blend = {};
-            blend.BlendOp = AC_SRC_OVER;
-            blend.SourceConstantAlpha = 255;
-            blend.AlphaFormat = AC_SRC_ALPHA;
-
-            // Get the window's current position for UpdateLayeredWindow
-            RECT rect;
-            GetWindowRect(parent_, &rect);
-            POINT ptDest = {rect.left, rect.top};
-
-            // Update the parent window's layer with the CEF-rendered content
-            ::UpdateLayeredWindow(parent_, hdc, &ptDest, &size, memDC, &ptSrc, 0, &blend, ULW_ALPHA);
-
-            SelectObject(memDC, oldBitmap);
-            DeleteObject(hBitmap);
-        }
-
-        DeleteDC(memDC);
-        ReleaseDC(NULL, hdc);
-    }
-
-    HWND GetHWND() const { return parent_; }
-
-    // Handle mouse events and forward to CEF
-    void HandleMouseEvent(UINT message, WPARAM wParam, LPARAM lParam) {
-        if (!browser_) {
-            printf("OSRWindow: No browser set!\n");
-            return;
-        }
-
-        CefRefPtr<CefBrowserHost> host = browser_->GetHost();
-        if (!host) {
-            printf("OSRWindow: No browser host!\n");
-            return;
-        }
-
-        CefMouseEvent mouse_event;
-        mouse_event.x = GET_X_LPARAM(lParam);
-        mouse_event.y = GET_Y_LPARAM(lParam);
-
-        // Set modifiers
-        mouse_event.modifiers = 0;
-        if (wParam & MK_CONTROL) mouse_event.modifiers |= EVENTFLAG_CONTROL_DOWN;
-        if (wParam & MK_SHIFT) mouse_event.modifiers |= EVENTFLAG_SHIFT_DOWN;
-        if (GetKeyState(VK_MENU) & 0x8000) mouse_event.modifiers |= EVENTFLAG_ALT_DOWN;
-
-        switch (message) {
-            case WM_MOUSEMOVE:
-                host->SendMouseMoveEvent(mouse_event, false);
-                break;
-
-            case WM_LBUTTONDOWN:
-            case WM_RBUTTONDOWN:
-            case WM_MBUTTONDOWN: {
-                CefBrowserHost::MouseButtonType btn_type =
-                    (message == WM_LBUTTONDOWN) ? MBT_LEFT :
-                    (message == WM_RBUTTONDOWN) ? MBT_RIGHT : MBT_MIDDLE;
-
-                printf("OSRWindow: Sending click at (%d, %d)\n", mouse_event.x, mouse_event.y);
-
-                host->SendMouseClickEvent(mouse_event, btn_type, false, 1);
-                break;
-            }
-
-            case WM_LBUTTONUP:
-            case WM_RBUTTONUP:
-            case WM_MBUTTONUP: {
-                CefBrowserHost::MouseButtonType btn_type =
-                    (message == WM_LBUTTONUP) ? MBT_LEFT :
-                    (message == WM_RBUTTONUP) ? MBT_RIGHT : MBT_MIDDLE;
-                host->SendMouseClickEvent(mouse_event, btn_type, true, 1);
-                break;
-            }
-
-            case WM_MOUSEWHEEL: {
-                int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-                host->SendMouseWheelEvent(mouse_event, 0, delta);
-                break;
-            }
-        }
-    }
-
-    // Handle keyboard events and forward to CEF
-    void HandleKeyEvent(UINT message, WPARAM wParam, LPARAM lParam) {
-        if (!browser_) return;
-
-        CefRefPtr<CefBrowserHost> host = browser_->GetHost();
-        if (!host) return;
-
-        CefKeyEvent key_event;
-        key_event.windows_key_code = (int)wParam;
-        key_event.native_key_code = (int)lParam;
-        key_event.is_system_key = (message == WM_SYSCHAR || message == WM_SYSKEYDOWN || message == WM_SYSKEYUP);
-
-        if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
-            key_event.type = KEYEVENT_RAWKEYDOWN;
-        } else if (message == WM_KEYUP || message == WM_SYSKEYUP) {
-            key_event.type = KEYEVENT_KEYUP;
-        } else if (message == WM_CHAR || message == WM_SYSCHAR) {
-            key_event.type = KEYEVENT_CHAR;
-        }
-
-        // Set modifiers
-        key_event.modifiers = 0;
-        if (GetKeyState(VK_SHIFT) & 0x8000) key_event.modifiers |= EVENTFLAG_SHIFT_DOWN;
-        if (GetKeyState(VK_CONTROL) & 0x8000) key_event.modifiers |= EVENTFLAG_CONTROL_DOWN;
-        if (GetKeyState(VK_MENU) & 0x8000) key_event.modifiers |= EVENTFLAG_ALT_DOWN;
-
-        host->SendKeyEvent(key_event);
-    }
-
-private:
-    HWND parent_;
-    unsigned char* pixel_buffer_;
-    int buffer_width_;
-    int buffer_height_;
-    size_t buffer_size_;
-    CefRefPtr<CefBrowser> browser_;
-};
-
-// CEF Render Handler for off-screen rendering (OSR) mode
-class ElectrobunRenderHandler : public CefRenderHandler {
-public:
-    ElectrobunRenderHandler() : view_width_(800), view_height_(600), osr_window_(nullptr) {}
-
-    void SetOSRWindow(OSRWindow* window) {
-        osr_window_ = window;
-    }
-
-    void SetViewSize(int width, int height) {
-        view_width_ = width;
-        view_height_ = height;
-    }
-
-    // CefRenderHandler methods
-    void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override {
-        rect.x = 0;
-        rect.y = 0;
-        rect.width = view_width_ > 0 ? view_width_ : 800;
-        rect.height = view_height_ > 0 ? view_height_ : 600;
-    }
-
-    void OnPaint(CefRefPtr<CefBrowser> browser,
-                 PaintElementType type,
-                 const RectList& dirtyRects,
-                 const void* buffer,
-                 int width,
-                 int height) override;
-
-private:
-    int view_width_;
-    int view_height_;
-    OSRWindow* osr_window_;
-
-    IMPLEMENT_REFCOUNTING(ElectrobunRenderHandler);
-};
-
-// Forward declaration
-void handleApplicationMenuSelection(UINT menuId);
-
-// CEF Keyboard Handler for menu accelerators
-class ElectrobunKeyboardHandler : public CefKeyboardHandler {
-public:
-    // Defined out-of-line after ElectrobunCefClient (needs full class definition)
-    bool OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
-                      const CefKeyEvent& event,
-                      CefEventHandle os_event,
-                      bool* is_keyboard_shortcut) override;
-
-private:
-    IMPLEMENT_REFCOUNTING(ElectrobunKeyboardHandler);
-};
-
-// CEF Client class with load and life span handlers
-class ElectrobunCefClient : public CefClient, public CefDisplayHandler {
-public:
-    WebviewEventHandler webview_event_handler_ = nullptr;
-
-    ElectrobunCefClient(uint32_t webviewId,
-                       HandlePostMessage eventBridgeHandler,
-                       HandlePostMessage bunBridgeHandler,
-                       HandlePostMessage internalBridgeHandler,
-                       bool sandbox)
-        : webview_id_(webviewId),
-          event_bridge_handler_(eventBridgeHandler),
-          bun_bridge_handler_(bunBridgeHandler),
-          webview_tag_handler_(internalBridgeHandler),
-          is_sandboxed_(sandbox),
-          osr_enabled_(false) {
-        m_loadHandler = new ElectrobunLoadHandler();
-        m_loadHandler->SetClient(this); // Set client reference for load handler
-        m_lifeSpanHandler = new ElectrobunLifeSpanHandler();
-        m_requestHandler = new ElectrobunRequestHandler();
-        m_requestHandler->SetWebviewId(webviewId);
-        m_requestHandler->SetClient(this); // Set client reference for response filter
-        m_contextMenuHandler = new ElectrobunContextMenuHandler();
-        m_permissionHandler = new ElectrobunPermissionHandler();
-        m_dialogHandler = new ElectrobunDialogHandler();
-        m_downloadHandler = new ElectrobunDownloadHandler();
-        m_keyboardHandler = new ElectrobunKeyboardHandler();
-        m_renderHandler = nullptr; // Created only when OSR is enabled
-    }
-
-    void EnableOSR(int width, int height) {
-        osr_enabled_ = true;
-        m_renderHandler = new ElectrobunRenderHandler();
-        m_renderHandler->SetViewSize(width, height);
-    }
-
-    void SetOSRWindow(OSRWindow* window) {
-        if (m_renderHandler) {
-            m_renderHandler->SetOSRWindow(window);
-        }
-    }
-
-    void ClearOSRWindow() {
-        if (m_renderHandler) {
-            m_renderHandler->SetOSRWindow(nullptr);
-        }
-    }
-
-    bool IsOSREnabled() const {
-        return osr_enabled_;
-    }
-
-    void SetWebviewEventHandler(WebviewEventHandler handler) {
-        webview_event_handler_ = handler;
-        if (m_requestHandler) {
-            m_requestHandler->SetWebviewEventHandler(handler);
-        }
-        if (m_loadHandler) {
-            m_loadHandler->SetWebviewEventHandler(handler);
-            m_loadHandler->SetWebviewId(webview_id_);
-        }
-    }
-
-    void SetAbstractView(AbstractView* view) {
-        if (m_requestHandler) {
-            m_requestHandler->SetAbstractView(view);
-        }
-    }
-
-    void AddPreloadScript(const std::string& script) {
-        electrobun_script_ = script;
-    }
-
-    void UpdateCustomPreloadScript(const std::string& script) {
-        custom_script_ = script;
-    }
-    
-    CefRefPtr<CefLoadHandler> GetLoadHandler() override {
-        return m_loadHandler;
-    }
-    
-    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
-        return m_lifeSpanHandler;
-    }
-    
-    CefRefPtr<CefRequestHandler> GetRequestHandler() override {
-        return m_requestHandler;
-    }
-    
-    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
-        return m_contextMenuHandler;
-    }
-    
-    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override {
-        return m_permissionHandler;
-    }
-    
-    CefRefPtr<CefDialogHandler> GetDialogHandler() override {
-        return m_dialogHandler;
-    }
-
-    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
-        return m_downloadHandler;
-    }
-
-    CefRefPtr<CefRenderHandler> GetRenderHandler() override {
-        return m_renderHandler;
-    }
-
-    CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override {
-        return m_keyboardHandler;
-    }
-
-    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
-        return this;
-    }
-
-    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
-                                 CefRefPtr<CefFrame> frame,
-                                 CefProcessId source_process,
-                                 CefRefPtr<CefProcessMessage> message) override {
-        std::string messageName = message->GetName().ToString();
-        std::string messageContent = message->GetArgumentList()->GetString(0).ToString();
-        
-        char* contentCopy = strdup(messageContent.c_str());
-
-        // eventBridge - event-only bridge (always process for all webviews, including sandboxed)
-        if (messageName == "EventBridgeMessage") {
-            if (event_bridge_handler_) {
-                event_bridge_handler_(webview_id_, contentCopy);
-            }
-            return true;
-        }
-        // bunBridge and internalBridge - RPC bridges (only for non-sandboxed webviews)
-        else if (!is_sandboxed_) {
-            if (messageName == "BunBridgeMessage") {
-                if (bun_bridge_handler_) {
-                    bun_bridge_handler_(webview_id_, contentCopy);
-                }
-                return true;
-            } else if (messageName == "internalMessage") {
-                if (webview_tag_handler_) {
-                    webview_tag_handler_(webview_id_, contentCopy);
-                }
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-
-    std::string GetCombinedScript() const {
-        // Inject webviewId into global scope before other scripts
-        std::string combined_script = "window.webviewId = " + std::to_string(webview_id_) + ";\n";
-        combined_script += electrobun_script_;
-        if (!custom_script_.empty()) {
-            combined_script += "\n" + custom_script_;
-        }
-        return combined_script;
-    }
-
-    void SetBrowser(CefRefPtr<CefBrowser> browser) {
-        browser_ = browser;
-        // Don't execute scripts here - they should execute on each navigation
-    }
-
-    void ExecutePreloadScripts() {
-        std::string script = GetCombinedScript();
-        if (!script.empty() && browser_ && browser_->GetMainFrame()) {
-            browser_->GetMainFrame()->ExecuteJavaScript(script, "", 0);
-        }
-    }
-
-    // Track page title for DevTools target matching
-    void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
-        if (browser && browser->GetMainFrame()) {
-            last_title_ = title.ToString();
-        }
-    }
-
-    // Open remote DevTools frontend for a specific browser (including OOPIFs)
-    void OpenRemoteDevToolsFrontend(CefRefPtr<CefBrowser> browser) {
-        if (!browser || !browser->GetHost()) return;
-
-        int target_id = browser->GetIdentifier();
-
-        // If already open, bring to front
-        auto it = devtools_hosts_.find(target_id);
-        if (it != devtools_hosts_.end() && it->second.is_open && it->second.window) {
-            ShowWindow(it->second.window, SW_SHOW);
-            SetForegroundWindow(it->second.window);
-            return;
-        }
-
-        // Get the browser's URL and title for matching against /json targets
-        std::string targetUrl;
-        if (browser->GetMainFrame()) {
-            targetUrl = browser->GetMainFrame()->GetURL().ToString();
-        }
-        std::string targetTitle = last_title_;
-        int port = g_remoteDebugPort;
-
-        // Keep ref to self for the background thread
-        CefRefPtr<ElectrobunCefClient> self(this);
-
-        // Fetch /json on a background thread
-        std::thread([self, target_id, targetUrl, targetTitle, port]() {
-            // WinHTTP synchronous GET to http://127.0.0.1:{port}/json
-            HINTERNET hSession = WinHttpOpen(L"Electrobun/DevTools",
-                                              WINHTTP_ACCESS_TYPE_NO_PROXY,
-                                              WINHTTP_NO_PROXY_NAME,
-                                              WINHTTP_NO_PROXY_BYPASS, 0);
-            if (!hSession) return;
-
-            wchar_t hostStr[64];
-            swprintf_s(hostStr, L"127.0.0.1");
-            HINTERNET hConnect = WinHttpConnect(hSession, hostStr, (INTERNET_PORT)port, 0);
-            if (!hConnect) { WinHttpCloseHandle(hSession); return; }
-
-            HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", L"/json",
-                                                     nullptr, WINHTTP_NO_REFERER,
-                                                     WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
-            if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return; }
-
-            BOOL bResults = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                                WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
-            if (!bResults) { WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return; }
-
-            bResults = WinHttpReceiveResponse(hRequest, nullptr);
-            if (!bResults) { WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return; }
-
-            // Read full response body
-            std::string jsonBody;
-            DWORD dwSize = 0;
-            DWORD dwDownloaded = 0;
-            do {
-                dwSize = 0;
-                WinHttpQueryDataAvailable(hRequest, &dwSize);
-                if (dwSize == 0) break;
-
-                std::vector<char> buf(dwSize + 1, 0);
-                WinHttpReadData(hRequest, buf.data(), dwSize, &dwDownloaded);
-                jsonBody.append(buf.data(), dwDownloaded);
-            } while (dwSize > 0);
-
-            WinHttpCloseHandle(hRequest);
-            WinHttpCloseHandle(hConnect);
-            WinHttpCloseHandle(hSession);
-
-            if (jsonBody.empty()) return;
-
-            // Simple JSON parsing for the /json array response.
-            // Each target object has "url", "title", "webSocketDebuggerUrl" fields.
-            // Find the target matching our browser's URL or title.
-
-            // Parse JSON array - find objects and extract fields
-            struct JsonTarget {
-                std::string url;
-                std::string title;
-                std::string wsUrl;
-            };
-            std::vector<JsonTarget> targets;
-
-            // Simple parser: split by objects in the array
-            size_t pos = 0;
-            while ((pos = jsonBody.find('{', pos)) != std::string::npos) {
-                size_t end = jsonBody.find('}', pos);
-                if (end == std::string::npos) break;
-
-                std::string obj = jsonBody.substr(pos, end - pos + 1);
-                JsonTarget t;
-
-                // Extract "url" field
-                auto extractField = [&obj](const std::string& fieldName) -> std::string {
-                    std::string key = "\"" + fieldName + "\"";
-                    size_t kp = obj.find(key);
-                    if (kp == std::string::npos) return "";
-                    size_t colon = obj.find(':', kp + key.length());
-                    if (colon == std::string::npos) return "";
-                    size_t qStart = obj.find('"', colon + 1);
-                    if (qStart == std::string::npos) return "";
-                    size_t qEnd = obj.find('"', qStart + 1);
-                    if (qEnd == std::string::npos) return "";
-                    return obj.substr(qStart + 1, qEnd - qStart - 1);
-                };
-
-                t.url = extractField("url");
-                t.title = extractField("title");
-                t.wsUrl = extractField("webSocketDebuggerUrl");
-                targets.push_back(t);
-
-                pos = end + 1;
-            }
-
-            if (targets.empty()) return;
-
-            // Match target by URL and/or title
-            const JsonTarget* selected = nullptr;
-            for (const auto& t : targets) {
-                bool urlMatch = !targetUrl.empty() && t.url == targetUrl;
-                bool titleMatch = !targetTitle.empty() && t.title == targetTitle;
-
-                if ((!targetUrl.empty() && !targetTitle.empty() && urlMatch && titleMatch) ||
-                    (!targetUrl.empty() && urlMatch) ||
-                    (!targetTitle.empty() && titleMatch)) {
-                    selected = &t;
-                    break;
-                }
-            }
-            if (!selected) {
-                selected = &targets[0];
-            }
-
-            if (selected->wsUrl.empty()) return;
-
-            // Build the DevTools frontend URL
-            // Strip ws:// prefix from the WebSocket URL
-            std::string wsParam = selected->wsUrl;
-            if (wsParam.substr(0, 5) == "ws://") {
-                wsParam = wsParam.substr(5);
-            }
-
-            std::string baseUrl = "http://127.0.0.1:" + std::to_string(port);
-            std::string finalUrl = baseUrl + "/devtools/inspector.html?ws=" + wsParam + "&dockSide=undocked";
-
-            // Post back to the UI thread via CefPostTask
-            class CreateDevToolsTask : public CefTask {
-            public:
-                CreateDevToolsTask(CefRefPtr<ElectrobunCefClient> client, int tid, const std::string& url)
-                    : client_(client), target_id_(tid), url_(url) {}
-                void Execute() override {
-                    client_->CreateRemoteDevToolsWindow(target_id_, url_);
-                }
-            private:
-                CefRefPtr<ElectrobunCefClient> client_;
-                int target_id_;
-                std::string url_;
-                IMPLEMENT_REFCOUNTING(CreateDevToolsTask);
-            };
-            CefPostTask(TID_UI, new CreateDevToolsTask(self, target_id, finalUrl));
-
-        }).detach();
-    }
-
-    // Create or reuse a DevTools window for a specific target
-    void CreateRemoteDevToolsWindow(int target_id, const std::string& url) {
-        EnsureDevToolsWindowClassRegistered();
-
-        DevToolsHost& host = devtools_hosts_[target_id];
-
-        if (!host.window) {
-            host.dt_ctx = new DevToolsWindowContext();
-            host.dt_ctx->close_callback = RemoteDevToolsClosed;
-            host.dt_ctx->ctx = this;
-            host.dt_ctx->target_id = target_id;
-
-            host.window = CreateWindowExA(
-                0,
-                DEVTOOLS_WINDOW_CLASS,
-                "DevTools",
-                WS_OVERLAPPEDWINDOW,
-                CW_USEDEFAULT, CW_USEDEFAULT, 1100, 800,
-                nullptr,  // No parent - standalone window
-                nullptr,
-                GetModuleHandle(NULL),
-                host.dt_ctx);
-        }
-
-        ShowWindow(host.window, SW_SHOW);
-        SetForegroundWindow(host.window);
-        host.is_open = true;
-
-        if (!host.client) {
-            host.client = new RemoteDevToolsClient(RemoteDevToolsClosed, this, target_id);
-        }
-
-        if (host.browser) {
-            // Reuse existing DevTools browser, just navigate to the new URL
-            host.browser->GetMainFrame()->LoadURL(CefString(url));
-            return;
-        }
-
-        // Create a new CEF browser inside the DevTools window
-        RECT rect;
-        GetClientRect(host.window, &rect);
-        CefRect cefRect(0, 0, rect.right - rect.left, rect.bottom - rect.top);
-
-        CefWindowInfo windowInfo;
-        windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-        windowInfo.SetAsChild((CefWindowHandle)host.window, cefRect);
-
-        CefBrowserSettings settings;
-        host.browser = CefBrowserHost::CreateBrowserSync(
-            windowInfo,
-            host.client,
-            CefString(url),
-            settings,
-            nullptr,
-            nullptr);
-
-        // Store the browser on the window context for WM_SIZE handling
-        if (host.dt_ctx) {
-            host.dt_ctx->browser = host.browser;
-        }
-
-        host.is_open = true;
-    }
-
-    void OnRemoteDevToolsClosed(int target_id) {
-        auto it = devtools_hosts_.find(target_id);
-        if (it == devtools_hosts_.end()) return;
-        it->second.is_open = false;
-        if (it->second.window) {
-            ShowWindow(it->second.window, SW_HIDE);
-        }
-    }
-
-    bool IsDevToolsOpen(int target_id) {
-        auto it = devtools_hosts_.find(target_id);
-        return it != devtools_hosts_.end() && it->second.is_open;
-    }
-
-    // Set load-end callback for deferred operations (like applying transparency after page load)
-    void SetLoadEndCallback(std::function<void()> callback) {
-        load_end_callback_ = callback;
-    }
-
-    // Called by load handler when page load completes
-    void OnLoadEnd() {
-        if (load_end_callback_) {
-            load_end_callback_();
-        }
-    }
-
-private:
-    uint32_t webview_id_;
-    HandlePostMessage event_bridge_handler_;
-    HandlePostMessage bun_bridge_handler_;
-    HandlePostMessage webview_tag_handler_;
-    bool is_sandboxed_;
-    std::string electrobun_script_;
-    std::string custom_script_;
-    CefRefPtr<CefBrowser> browser_;
-    CefRefPtr<ElectrobunLoadHandler> m_loadHandler;
-    CefRefPtr<ElectrobunLifeSpanHandler> m_lifeSpanHandler;
-    CefRefPtr<ElectrobunRequestHandler> m_requestHandler;
-    CefRefPtr<ElectrobunContextMenuHandler> m_contextMenuHandler;
-    CefRefPtr<ElectrobunPermissionHandler> m_permissionHandler;
-    CefRefPtr<ElectrobunDialogHandler> m_dialogHandler;
-    CefRefPtr<ElectrobunDownloadHandler> m_downloadHandler;
-    CefRefPtr<ElectrobunKeyboardHandler> m_keyboardHandler;
-    CefRefPtr<ElectrobunRenderHandler> m_renderHandler;
-    bool osr_enabled_;
-    std::function<void()> load_end_callback_;  // Callback for page load completion
-
-    // Remote DevTools state - tracked per CefBrowser (by identifier)
-    struct DevToolsHost {
-        HWND window = nullptr;
-        CefRefPtr<CefBrowser> browser;
-        CefRefPtr<RemoteDevToolsClient> client;
-        DevToolsWindowContext* dt_ctx = nullptr;
-        bool is_open = false;
-    };
-    std::map<int, DevToolsHost> devtools_hosts_;
-    std::string last_title_;
-
-    IMPLEMENT_REFCOUNTING(ElectrobunCefClient);
-};
-
-// Free function callback for RemoteDevToolsClient -> ElectrobunCefClient
-void RemoteDevToolsClosed(void* ctx, int target_id) {
-    if (!ctx) return;
-    static_cast<ElectrobunCefClient*>(ctx)->OnRemoteDevToolsClosed(target_id);
-}
-
-// Out-of-line definitions for handlers that need ElectrobunCefClient to be fully defined
-
-bool ElectrobunContextMenuHandler::OnContextMenuCommand(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame,
-    CefRefPtr<CefContextMenuParams> params,
-    int command_id,
-    EventFlags event_flags) {
-    if (command_id == 26501) {
-        // Open remote DevTools via the owning ElectrobunCefClient
-        CefRefPtr<CefClient> client = browser->GetHost()->GetClient();
-        ElectrobunCefClient* ebClient = static_cast<ElectrobunCefClient*>(client.get());
-        if (ebClient) {
-            ebClient->OpenRemoteDevToolsFrontend(browser);
-        }
-        return true;
-    }
-    return false;
-}
-
-bool ElectrobunKeyboardHandler::OnPreKeyEvent(
-    CefRefPtr<CefBrowser> browser,
-    const CefKeyEvent& event,
-    CefEventHandle os_event,
-    bool* is_keyboard_shortcut) {
-    // Only handle key down events
-    if (event.type != KEYEVENT_RAWKEYDOWN) {
-        return false;
-    }
-
-    // F12 or Ctrl+Shift+I -> open DevTools
-    bool isF12 = (event.windows_key_code == 123);
-    bool isCtrlShiftI = (event.windows_key_code == 'I' &&
-                         (event.modifiers & EVENTFLAG_CONTROL_DOWN) &&
-                         (event.modifiers & EVENTFLAG_SHIFT_DOWN));
-    if (isF12 || isCtrlShiftI) {
-        CefRefPtr<CefClient> client = browser->GetHost()->GetClient();
-        ElectrobunCefClient* ebClient = static_cast<ElectrobunCefClient*>(client.get());
-        if (ebClient) {
-            ebClient->OpenRemoteDevToolsFrontend(browser);
-        }
-        return true;
-    }
-
-    // Check if we have accelerator entries
-    if (g_menuAccelerators.empty()) {
-        return false;
-    }
-
-    // Build the current modifier state from CEF event
-    BYTE modifiers = FVIRTKEY;
-    if (event.modifiers & EVENTFLAG_CONTROL_DOWN) modifiers |= FCONTROL;
-    if (event.modifiers & EVENTFLAG_ALT_DOWN) modifiers |= FALT;
-    if (event.modifiers & EVENTFLAG_SHIFT_DOWN) modifiers |= FSHIFT;
-
-    // Check if this key combination matches any accelerator
-    WORD vkCode = (WORD)event.windows_key_code;
-
-    for (const auto& accel : g_menuAccelerators) {
-        if (accel.key == vkCode && accel.fVirt == modifiers) {
-            // Found a match! Trigger the menu command directly
-            handleApplicationMenuSelection(accel.cmd);
-            return true;  // Prevent CEF from processing this key
-        }
-    }
-
-    return false;
-}
-
-// ElectrobunRenderHandler::OnPaint implementation
-void ElectrobunRenderHandler::OnPaint(CefRefPtr<CefBrowser> browser,
-                                       PaintElementType type,
-                                       const RectList& dirtyRects,
-                                       const void* buffer,
-                                       int width,
-                                       int height) {
-    if (osr_window_ && buffer && width > 0 && height > 0) {
-        osr_window_->UpdateBuffer(buffer, width, height);
-    }
-}
-
-// Helper function implementation (defined after ElectrobunCefClient class)
-void SetBrowserOnClient(CefRefPtr<ElectrobunCefClient> client, CefRefPtr<CefBrowser> browser) {
-    if (client && browser) {
-        client->SetBrowser(browser);
-        // Store preload scripts for this browser ID so load handler can access them
-        std::string script = client->GetCombinedScript();
-        if (!script.empty()) {
-            g_preloadScripts[browser->GetIdentifier()] = script;
-        }
-    }
-}
-
-// ElectrobunLoadHandler method implementations (defined after ElectrobunCefClient class)
-void ElectrobunLoadHandler::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) {
-    // NOTE: OnLoadStart is now a fallback - primary injection happens via GetResourceResponseFilter
-    // This ensures preload scripts are in the HTML before parsing, guaranteeing execution order
-}
-
-void ElectrobunLoadHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) {
-    // Fire did-navigate event
-    if (frame->IsMain() && webview_event_handler_) {
-        std::string url = frame->GetURL().ToString();
-        webview_event_handler_(webview_id_, _strdup("did-navigate"), _strdup(url.c_str()));
-    }
-
-    // Call load end callback for deferred operations (like transparency)
-    if (frame->IsMain() && client_) {
-        client_->OnLoadEnd();
-    }
-}
-
-// ElectrobunResourceRequestHandler method implementations (defined after ElectrobunCefClient class)
-CefRefPtr<CefResponseFilter> ElectrobunResourceRequestHandler::GetResourceResponseFilter(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame,
-    CefRefPtr<CefRequest> request,
-    CefRefPtr<CefResponse> response) {
-
-    std::string url = request->GetURL().ToString();
-    std::string mimeType = response->GetMimeType().ToString();
-    bool isMain = frame->IsMain();
-    bool hasClient = client_ != nullptr;
-
-    std::cout << "[CEF] GetResourceResponseFilter called: url=" << url
-              << " mimeType=" << mimeType
-              << " isMain=" << isMain
-              << " hasClient=" << hasClient << std::endl;
-
-    // Only filter main frame HTML responses
-    if (isMain && hasClient && mimeType.find("html") != std::string::npos) {
-        std::string combinedScript = client_->GetCombinedScript();
-        std::cout << "[CEF] HTML response detected, scriptLength=" << combinedScript.length() << std::endl;
-
-        if (!combinedScript.empty()) {
-            std::cout << "[CEF] Installing response filter to inject preload scripts into HTML" << std::endl;
-            return new ElectrobunResponseFilter(combinedScript);
-        }
-    }
-
-    return nullptr;
-}
-
-// Runtime CEF availability detection - Windows equivalent of macOS isCEFAvailable()
-bool isCEFAvailable() {
-    char exePath[MAX_PATH];
-    GetModuleFileNameA(NULL, exePath, MAX_PATH);
-    char* lastSlash = strrchr(exePath, '\\');
-    if (lastSlash) {
-        *lastSlash = '\0';
-    }
-    
-    // Check for essential CEF files
-    std::string cefLibPath = std::string(exePath) + "\\libcef.dll";
-    std::string icuDataPath = std::string(exePath) + "\\icudtl.dat";
-    
-    DWORD libAttributes = GetFileAttributesA(cefLibPath.c_str());
-    DWORD icuAttributes = GetFileAttributesA(icuDataPath.c_str());
-    
-    bool libExists = (libAttributes != INVALID_FILE_ATTRIBUTES && !(libAttributes & FILE_ATTRIBUTE_DIRECTORY));
-    bool icuExists = (icuAttributes != INVALID_FILE_ATTRIBUTES && !(icuAttributes & FILE_ATTRIBUTE_DIRECTORY));
-    
-    return libExists && icuExists;
 }
 
 class StatusItemTarget {
@@ -2706,15 +815,25 @@ public:
 class MainThreadDispatcher {
 private:
     static HWND g_messageWindow;
+    static DWORD g_messageThreadId;
 
 public:
     static void initialize(HWND hwnd) {
         g_messageWindow = hwnd;
+        g_messageThreadId = hwnd ? GetWindowThreadProcessId(hwnd, nullptr) : 0;
+    }
+
+    static bool is_main_thread() {
+        return g_messageThreadId != 0 && GetCurrentThreadId() == g_messageThreadId;
     }
     
     template<typename Func>
     static auto dispatch_sync(Func&& func) -> decltype(func()) {
         using ReturnType = decltype(func());
+
+        if (is_main_thread() || !g_messageWindow) {
+            return func();
+        }
         
         if constexpr (std::is_void_v<ReturnType>) {
             auto promise = std::make_shared<std::promise<void>>();
@@ -2756,12 +875,17 @@ public:
     
     template<typename Func>
     static void dispatch_async(Func&& func) {
+        if (!g_messageWindow) {
+            func();
+            return;
+        }
         auto task = new std::function<void()>(std::forward<Func>(func));
         PostMessage(g_messageWindow, WM_EXECUTE_ASYNC_BLOCK, 0, (LPARAM)task);
     }
 };
 
 HWND MainThreadDispatcher::g_messageWindow = NULL;
+DWORD MainThreadDispatcher::g_messageThreadId = 0;
 
 // AbstractView base class - Windows implementation matching Mac pattern
 class AbstractView {
@@ -3079,7 +1203,7 @@ public:
         webview->AddHostObjectToScript(L"eventBridge", &eventBridgeVariant);
         VariantClear(&eventBridgeVariant);
 
-        // bunBridge and internalBridge - RPC bridges (only for non-sandboxed webviews)
+        // hostBridge/bunBridge aliases and internalBridge - RPC bridges (only for non-sandboxed webviews)
         if (!isSandboxed) {
             // Create COM objects for the bridge handlers
             bunBridgeHandler = ComPtr<BridgeHandler>(new BridgeHandler("bunBridge", bunBridgeCallbackHandler, webviewId));
@@ -3097,6 +1221,7 @@ public:
             internalBridgeVariant.pdispVal = static_cast<IDispatch*>(internalBridgeHandler.Get());
 
             // Add the bridge objects to hostObjects
+            webview->AddHostObjectToScript(L"hostBridge", &bunBridgeVariant);
             webview->AddHostObjectToScript(L"bunBridge", &bunBridgeVariant);
             webview->AddHostObjectToScript(L"internalBridge", &internalBridgeVariant);
 
@@ -3315,8 +1440,7 @@ public:
 
         // Check if this is a views:// URL for a script file
         if (strncmp(jsString, "views://", 8) == 0) {
-            // Remove "views://" prefix and load the file
-            scriptContent = loadViewsFile(std::string(jsString + 8));
+            scriptContent = loadViewsFile(normalizeViewsRelativePath(jsString));
             if (scriptContent.empty()) {
                 std::cout << "[WebView2] Could not read preload script from: " << jsString << std::endl;
                 return;
@@ -3394,11 +1518,6 @@ public:
         // 2. SetWindowRgn on Intermediate D3D Window - Ignored by D3D surface
         // 3. SetWindowRgn on shared container - Affects all webviews, not just the target
         //
-        // CEF (Chromium bundling) works because it provides direct access to the browser
-        // window handle via browser->GetHost()->GetWindowHandle(), which respects SetWindowRgn.
-        //
-        // Recommendation: Use CEF (bundleChromium: true) for webviews that require maskJSON
-        // functionality on Windows.
         //
         // The maskJSON value is still stored (in AbstractView::maskJSON) for potential future
         // use if WebView2 adds an API for visual clipping.
@@ -3477,678 +1596,6 @@ public:
 
 // Initialize static debounce timestamp for ctrl+click handling
 double WebView2View::lastCtrlClickTime = 0;
-
-// CEFView class - implements AbstractView for CEF
-class CEFView : public AbstractView {
-private:
-    CefRefPtr<CefBrowser> browser;
-    CefRefPtr<ElectrobunCefClient> client;
-    OSRWindow* osr_window;
-    bool is_osr_mode;
-
-public:
-    CEFView(uint32_t webviewId) : osr_window(nullptr), is_osr_mode(false) {
-        this->webviewId = webviewId;
-    }
-
-    ~CEFView() {
-        // If remove() wasn't called (e.g. window destroyed directly via WM_DESTROY
-        // without explicit webview removal), clean up the browser properly.
-        if (browser) {
-            // Invalidate render handler's OSR pointer before we delete it
-            if (client) {
-                client->ClearOSRWindow();
-            }
-
-            CefRefPtr<CefBrowserHost> host = browser->GetHost();
-            browser = nullptr;
-            client = nullptr;
-
-            if (host) {
-                host->CloseBrowser(true);
-            }
-        } else if (client) {
-            // remove() was called (browser is null) but client might still be set
-            // in older code paths - clear the OSR pointer just in case
-            client->ClearOSRWindow();
-            client = nullptr;
-        }
-
-        // Clean up global maps that hold raw pointers to this object
-        for (auto it = g_cefViews.begin(); it != g_cefViews.end(); ++it) {
-            if (it->second == this) {
-                g_cefViews.erase(it);
-                break;
-            }
-        }
-        {
-            std::lock_guard<std::mutex> lock(g_abstractViewsMutex);
-            g_abstractViews.erase(this->webviewId);
-        }
-
-        if (osr_window) {
-            delete osr_window;
-            osr_window = nullptr;
-        }
-    }
-
-    void setOSRWindow(OSRWindow* window) {
-        osr_window = window;
-        is_osr_mode = true;
-    }
-
-    bool isOSRMode() const {
-        return is_osr_mode;
-    }
-    
-    void loadURL(const char* urlString) override {
-        if (browser) {
-            browser->GetMainFrame()->LoadURL(urlString);
-        }
-    }
-    
-    void loadHTML(const char* htmlString) override {
-        if (browser && htmlString) {
-            // Create a data URI for the HTML content
-            std::string dataUri = "data:text/html;charset=utf-8,";
-            dataUri += htmlString;
-            browser->GetMainFrame()->LoadURL(CefString(dataUri));
-        }
-    }
-    
-    void goBack() override {
-        if (browser) {
-            browser->GoBack();
-        }
-    }
-    
-    void goForward() override {
-        if (browser) {
-            browser->GoForward();
-        }
-    }
-    
-    void reload() override {
-        if (browser) {
-            browser->Reload();
-        }
-    }
-    
-    void remove() override {
-        if (browser) {
-            std::cout << "[CEF] CEFView::remove() called for browser ID " << browser->GetIdentifier() << std::endl;
-
-            // Get the browser host before we clear the reference
-            CefRefPtr<CefBrowserHost> host = browser->GetHost();
-
-            // First, hide the browser window to make removal appear instant
-            HWND browserHwnd = host->GetWindowHandle();
-            if (browserHwnd) {
-                ShowWindow(browserHwnd, SW_HIDE);
-            }
-
-            // Invalidate the render handler's OSR window pointer BEFORE async close.
-            // CEF may still fire OnPaint() callbacks during the close sequence, and
-            // the OSRWindow will be deleted when this CEFView is destroyed.
-            if (client) {
-                client->ClearOSRWindow();
-            }
-
-            // Clean up global maps to prevent stale pointer access from window messages
-            for (auto it = g_cefViews.begin(); it != g_cefViews.end(); ++it) {
-                if (it->second == this) {
-                    g_cefViews.erase(it);
-                    break;
-                }
-            }
-            for (auto it = g_cefClients.begin(); it != g_cefClients.end();) {
-                if (it->second == client) {
-                    it = g_cefClients.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-
-            // Clear our references
-            browser = nullptr;
-            client = nullptr;
-
-            // Defer the actual browser close to avoid synchronous window message issues
-            // Use CloseBrowser(true) to force close since we return true from DoClose
-            // to prevent CEF from sending WM_CLOSE to parent window
-            MainThreadDispatcher::dispatch_async([host]() {
-                std::cout << "[CEF] Calling CloseBrowser(true) from dispatch_async" << std::endl;
-                host->CloseBrowser(true);  // force=true since DoClose returns true
-            });
-        }
-    }
-    
-    bool canGoBack() override {
-        if (browser) {
-            return browser->CanGoBack();
-        }
-        return false;
-    }
-    
-    bool canGoForward() override {
-        if (browser) {
-            return browser->CanGoForward();
-        }
-        return false;
-    }
-    
-    void evaluateJavaScriptWithNoCompletion(const char* jsString) override {
-        if (browser) {
-            // Copy string to avoid lifetime issues in lambda
-            std::string jsStringCopy = jsString;
-            MainThreadDispatcher::dispatch_sync([this, jsStringCopy]() {
-                browser->GetMainFrame()->ExecuteJavaScript(jsStringCopy.c_str(), "", 0);
-            });
-        }
-    }
-    
-    void callAsyncJavascript(const char* messageId, const char* jsString, uint32_t webviewId, uint32_t hostWebviewId, void* completionHandler) override {
-        if (browser) {
-            // CEF async JavaScript execution would need additional implementation
-            browser->GetMainFrame()->ExecuteJavaScript(jsString, "", 0);
-        }
-    }
-    
-    void addPreloadScriptToWebView(const char* jsString) override {
-        if (!jsString) return;
-        
-        // For CEF, preload scripts are typically handled via CefClient::OnContextCreated
-        // For now, store the script to be injected when the context is created
-        if (browser) {
-            browser->GetMainFrame()->ExecuteJavaScript(jsString, browser->GetMainFrame()->GetURL(), 0);
-        }
-    }
-    
-    void updateCustomPreloadScript(const char* jsString) override {
-        if (!jsString) return;
-        
-        // Check if this is a views:// URL for a script file
-        if (strncmp(jsString, "views://", 8) == 0) {
-            // Read the script file using existing WebView2 logic
-            std::string scriptContent = loadViewsFile(std::string(jsString + 8)); // Remove "views://" prefix
-            if (!scriptContent.empty()) {
-                if (browser) {
-                    browser->GetMainFrame()->ExecuteJavaScript(scriptContent.c_str(), browser->GetMainFrame()->GetURL(), 0);
-                }
-            } else {
-                log(std::string("CEFView: Could not read preload script from: ") + std::string(jsString));
-            }
-        } else {
-            // Inline JavaScript
-            if (browser) {
-                browser->GetMainFrame()->ExecuteJavaScript(jsString, browser->GetMainFrame()->GetURL(), 0);
-            }
-        }
-    }
-    
-    // CEF-specific methods
-    void setBrowser(CefRefPtr<CefBrowser> br) {
-        browser = br;
-        // If OSR mode, also set the browser on the OSR window for event handling
-        if (osr_window && br) {
-            osr_window->SetBrowser(br);
-        }
-    }
-    
-    void setClient(CefRefPtr<ElectrobunCefClient> cl) {
-        client = cl;
-    }
-    
-    CefRefPtr<CefBrowser> getBrowser() {
-        return browser;
-    }
-    
-    CefRefPtr<ElectrobunCefClient> getClient() {
-        return client;
-    }
-    
-    void resize(const RECT& frame, const char* masksJson) override {
-        if (browser) {
-            // Get the CEF browser's window handle and update its position/size
-            HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-            if (browserHwnd) {
-                int width = frame.right - frame.left;
-                int height = frame.bottom - frame.top;
-                
-                
-                // Move and resize the CEF browser window, bringing it to front
-                SetWindowPos(browserHwnd, HWND_TOP, frame.left, frame.top, width, height,
-                           SWP_NOACTIVATE | SWP_SHOWWINDOW);
-            }
-            
-            // Notify CEF that the browser was resized
-            browser->GetHost()->WasResized();
-            visualBounds = frame;
-
-            bool maskChanged = false;
-            // Check if masksJson is nullptr, empty, or just "[]" (empty array)
-            if (masksJson && strlen(masksJson) > 0 && strcmp(masksJson, "[]") != 0) {
-                std::string newMaskJSON = masksJson;
-                if (newMaskJSON != maskJSON) {
-                    maskJSON = newMaskJSON;
-                    maskChanged = true;
-                }
-            } else if (!maskJSON.empty()) {
-                maskJSON = "";
-                maskChanged = true;
-            }
-
-            // Only apply visual mask if mask data changed
-            if (maskChanged) {
-                applyVisualMask();
-            }
-        }
-    }
-
-    // CEF-specific implementation of mask functionality
-    void applyVisualMask() override {
-        if (!browser) {
-            return;
-        }
-        
-        HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-        if (!browserHwnd) {
-            return;
-        }
-        
-        if (maskJSON.empty()) {
-            // Remove any existing mask by setting full window region
-            RECT windowRect;
-            GetClientRect(browserHwnd, &windowRect);
-            HRGN fullRegion = CreateRectRgn(0, 0, windowRect.right, windowRect.bottom);
-            SetWindowRgn(browserHwnd, fullRegion, TRUE);
-            return;
-        }
-        
-        try {
-            // Get the CEF browser window bounds
-            RECT bounds = visualBounds;
-            int width = bounds.right - bounds.left;
-            int height = bounds.bottom - bounds.top;
-            
-            if (width <= 0 || height <= 0) {
-                return;
-            }
-            
-            // Create base region covering entire browser window
-            HRGN browserRegion = CreateRectRgn(0, 0, width, height);
-            
-            // Parse maskJSON and subtract mask regions (holes)
-            size_t pos = 0;
-            int maskCount = 0;
-            while ((pos = maskJSON.find("\"x\":", pos)) != std::string::npos) {
-                try {
-                    // Extract mask rectangle coordinates  
-                    size_t xStart = maskJSON.find(":", pos) + 1;
-                    size_t xEnd = maskJSON.find(",", xStart);
-                    int x = std::stoi(maskJSON.substr(xStart, xEnd - xStart));
-                    
-                    size_t yPos = maskJSON.find("\"y\":", pos);
-                    size_t yStart = maskJSON.find(":", yPos) + 1;
-                    size_t yEnd = maskJSON.find(",", yStart);
-                    int y = std::stoi(maskJSON.substr(yStart, yEnd - yStart));
-                    
-                    size_t wPos = maskJSON.find("\"width\":", pos);
-                    size_t wStart = maskJSON.find(":", wPos) + 1;
-                    size_t wEnd = maskJSON.find(",", wStart);
-                    if (wEnd == std::string::npos) wEnd = maskJSON.find("}", wStart);
-                    int maskWidth = std::stoi(maskJSON.substr(wStart, wEnd - wStart));
-                    
-                    size_t hPos = maskJSON.find("\"height\":", pos);
-                    size_t hStart = maskJSON.find(":", hPos) + 1;
-                    size_t hEnd = maskJSON.find("}", hStart);
-                    int maskHeight = std::stoi(maskJSON.substr(hStart, hEnd - hStart));
-                    
-                    // Create hole region and subtract from browser region
-                    HRGN holeRegion = CreateRectRgn(x, y, x + maskWidth, y + maskHeight);
-                    if (holeRegion) {
-                        CombineRgn(browserRegion, browserRegion, holeRegion, RGN_DIFF);
-                        DeleteObject(holeRegion);
-                        maskCount++;
-                    }
-                    
-                    pos = hEnd;
-                } catch (const std::exception& e) {
-                    pos++;
-                }
-            }
-            
-            if (maskCount > 0) {
-                // Apply the region with holes to the CEF browser window
-                SetWindowRgn(browserHwnd, browserRegion, TRUE);
-            } else {
-                // No valid masks found, clean up
-                DeleteObject(browserRegion);
-            }
-            
-        } catch (const std::exception& e) {
-            // Silent error handling
-        }
-    }
-    
-    void removeMasks() override {
-        if (!browser) {
-            return;
-        }
-        
-        HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-        if (!browserHwnd) {
-            return;
-        }
-        
-        // Remove window region to restore full visibility
-        SetWindowRgn(browserHwnd, NULL, TRUE);
-    }
-    
-    void toggleMirrorMode(bool enable) override {
-        if (enable && !mirrorModeEnabled) {
-            mirrorModeEnabled = true;
-            // CEF-specific input disabling
-            if (browser) {
-                HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-                if (browserHwnd) {
-                    // Disable input by making the window non-interactive
-                    EnableWindow(browserHwnd, FALSE);
-                    // char logMsg[128];
-                    // sprintf_s(logMsg, "CEF mirror mode: Disabled input for browser HWND=%p", browserHwnd);
-                    // ::log(logMsg);
-                }
-            }
-        } else if (!enable && mirrorModeEnabled) {
-            mirrorModeEnabled = false;
-            // CEF-specific input enabling
-            if (browser) {
-                HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-                if (browserHwnd) {
-                    // Enable input by making the window interactive again
-                    EnableWindow(browserHwnd, TRUE);
-                    // char logMsg[128];
-                    // sprintf_s(logMsg, "CEF mirror mode: Enabled input for browser HWND=%p", browserHwnd);
-                    // ::log(logMsg);
-                }
-            }
-        }
-    }
-    
-    // Override transparency implementation for CEF
-    // On Windows, transparency for CEF is implemented as hiding/showing since SetLayeredWindowAttributes often fails on child windows
-    void setTransparent(bool transparent) override {
-        if (!browser) {
-            return;
-        }
-        
-        HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-        if (!browserHwnd) {
-            return;
-        }
-        
-        if (transparent) {
-            // For transparency, hide the window completely
-            ShowWindow(browserHwnd, SW_HIDE);
-        } else {
-            // For opacity, show the window
-            ShowWindow(browserHwnd, SW_SHOW);
-        }
-    }
-    
-    // Override passthrough implementation for CEF
-    void setPassthrough(bool enable) override {
-        AbstractView::setPassthrough(enable); // Call base implementation to set the flag
-        
-        if (!browser) {
-            return;
-        }
-        
-        HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-        if (!browserHwnd) {
-            return;
-        }
-        
-        LONG exStyle = GetWindowLong(browserHwnd, GWL_EXSTYLE);
-        if (enable) {
-            // Make the window transparent to mouse clicks
-            SetWindowLong(browserHwnd, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT);
-        } else {
-            // Remove mouse transparency
-            SetWindowLong(browserHwnd, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
-        }
-    }
-    
-    // Override hidden implementation for CEF
-    // On Windows, setHidden is an alias for setTransparent since transparency provides the desired hide + passthrough behavior
-    void setHidden(bool hidden) override {
-        // Use the working transparency implementation which provides hide + passthrough behavior
-        setTransparent(hidden);
-
-        // Also handle the container window using base implementation
-        AbstractView::setHidden(hidden);
-    }
-
-    // Forward window messages to OSR window for event handling
-    void HandleWindowMessage(UINT message, WPARAM wParam, LPARAM lParam) {
-        if (osr_window) {
-            if (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) {
-                osr_window->HandleMouseEvent(message, wParam, lParam);
-            } else if (message >= WM_KEYFIRST && message <= WM_KEYLAST) {
-                osr_window->HandleKeyEvent(message, wParam, lParam);
-            }
-        }
-    }
-
-    void findInPage(const char* searchText, bool forward, bool matchCase) override {
-        if (!browser) return;
-
-        CefRefPtr<CefBrowserHost> host = browser->GetHost();
-        if (!host) return;
-
-        if (!searchText || strlen(searchText) == 0) {
-            host->StopFinding(true);
-            return;
-        }
-
-        // Use CEF's native find functionality
-        host->Find(CefString(searchText), forward, matchCase, false);
-    }
-
-    void stopFindInPage() override {
-        if (!browser) return;
-
-        CefRefPtr<CefBrowserHost> host = browser->GetHost();
-        if (host) {
-            host->StopFinding(true); // true = clear selection
-        }
-    }
-
-    void openDevTools() override {
-        if (!browser || !client) return;
-        client->OpenRemoteDevToolsFrontend(browser);
-    }
-
-    void closeDevTools() override {
-        if (!browser || !client) return;
-        int target_id = browser->GetIdentifier();
-        client->OnRemoteDevToolsClosed(target_id);
-    }
-
-    void toggleDevTools() override {
-        if (!browser || !client) return;
-        int target_id = browser->GetIdentifier();
-        if (client->IsDevToolsOpen(target_id)) {
-            client->OnRemoteDevToolsClosed(target_id);
-        } else {
-            client->OpenRemoteDevToolsFrontend(browser);
-        }
-    }
-};
-
-// WGPUView class - simple native child window surface
-class WGPUView : public AbstractView {
-public:
-    WGPUView(uint32_t webviewId) {
-        this->webviewId = webviewId;
-    }
-
-    void loadURL(const char* urlString) override {}
-    void loadHTML(const char* htmlString) override {}
-    void goBack() override {}
-    void goForward() override {}
-    void reload() override {}
-    bool canGoBack() override { return false; }
-    bool canGoForward() override { return false; }
-    void evaluateJavaScriptWithNoCompletion(const char* jsString) override {}
-    void callAsyncJavascript(const char* messageId, const char* jsString, uint32_t webviewId, uint32_t hostWebviewId, void* completionHandler) override {}
-    void addPreloadScriptToWebView(const char* jsString) override {}
-    void updateCustomPreloadScript(const char* jsString) override {}
-
-    void resize(const RECT& frame, const char* masksJson) override {
-        if (hwnd) {
-            int width = frame.right - frame.left;
-            int height = frame.bottom - frame.top;
-            SetWindowPos(hwnd, HWND_TOP, frame.left, frame.top, width, height,
-                        SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        }
-        visualBounds = frame;
-        bool maskChanged = false;
-        if (masksJson && strlen(masksJson) > 0 && strcmp(masksJson, "[]") != 0) {
-            std::string newMaskJSON = masksJson;
-            if (newMaskJSON != maskJSON) {
-                maskJSON = newMaskJSON;
-                maskChanged = true;
-            }
-        } else if (!maskJSON.empty()) {
-            maskJSON = "";
-            maskChanged = true;
-        }
-
-        if (maskChanged) {
-            applyVisualMask();
-        }
-    }
-
-    void setTransparent(bool transparent) override {
-        if (!hwnd) return;
-        LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
-        BYTE alpha = transparent ? 0 : 255;
-        SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
-    }
-
-    void setPassthrough(bool enable) override {
-        AbstractView::setPassthrough(enable);
-        if (hwnd) {
-            EnableWindow(hwnd, enable ? FALSE : TRUE);
-        }
-    }
-
-    void setHidden(bool hidden) override {
-        if (hwnd) {
-            ShowWindow(hwnd, hidden ? SW_HIDE : SW_SHOW);
-        }
-    }
-
-    void applyVisualMask() override {
-        if (!hwnd) return;
-
-        if (maskJSON.empty()) {
-            RECT windowRect;
-            GetClientRect(hwnd, &windowRect);
-            HRGN fullRegion = CreateRectRgn(0, 0, windowRect.right, windowRect.bottom);
-            SetWindowRgn(hwnd, fullRegion, TRUE);
-            return;
-        }
-
-        try {
-            int width = visualBounds.right - visualBounds.left;
-            int height = visualBounds.bottom - visualBounds.top;
-            if (width <= 0 || height <= 0) return;
-
-            HRGN baseRegion = CreateRectRgn(0, 0, width, height);
-
-            size_t pos = 0;
-            while ((pos = maskJSON.find("\"x\":", pos)) != std::string::npos) {
-                try {
-                    size_t xStart = maskJSON.find(":", pos) + 1;
-                    size_t xEnd = maskJSON.find(",", xStart);
-                    int x = std::stoi(maskJSON.substr(xStart, xEnd - xStart));
-
-                    size_t yPos = maskJSON.find("\"y\":", pos);
-                    size_t yStart = maskJSON.find(":", yPos) + 1;
-                    size_t yEnd = maskJSON.find(",", yStart);
-                    int y = std::stoi(maskJSON.substr(yStart, yEnd - yStart));
-
-                    size_t wPos = maskJSON.find("\"width\":", pos);
-                    size_t wStart = maskJSON.find(":", wPos) + 1;
-                    size_t wEnd = maskJSON.find(",", wStart);
-                    if (wEnd == std::string::npos) wEnd = maskJSON.find("}", wStart);
-                    int maskWidth = std::stoi(maskJSON.substr(wStart, wEnd - wStart));
-
-                    size_t hPos = maskJSON.find("\"height\":", pos);
-                    size_t hStart = maskJSON.find(":", hPos) + 1;
-                    size_t hEnd = maskJSON.find("}", hStart);
-                    int maskHeight = std::stoi(maskJSON.substr(hStart, hEnd - hStart));
-
-                    HRGN holeRegion = CreateRectRgn(x, y, x + maskWidth, y + maskHeight);
-                    if (holeRegion) {
-                        CombineRgn(baseRegion, baseRegion, holeRegion, RGN_DIFF);
-                        DeleteObject(holeRegion);
-                    }
-
-                    pos = hEnd;
-                } catch (...) {
-                    pos++;
-                }
-            }
-
-            SetWindowRgn(hwnd, baseRegion, TRUE);
-        } catch (...) {
-            // Ignore mask parse errors
-        }
-    }
-
-    void removeMasks() override {
-        if (!hwnd) return;
-        RECT windowRect;
-        GetClientRect(hwnd, &windowRect);
-        HRGN fullRegion = CreateRectRgn(0, 0, windowRect.right, windowRect.bottom);
-        SetWindowRgn(hwnd, fullRegion, TRUE);
-        maskJSON.clear();
-    }
-    void toggleMirrorMode(bool enable) override {}
-
-    void findInPage(const char* searchText, bool forward, bool matchCase) override {}
-    void stopFindInPage() override {}
-    void openDevTools() override {}
-    void closeDevTools() override {}
-    void toggleDevTools() override {}
-
-    void remove() override {
-        if (hwnd) {
-            DestroyWindow(hwnd);
-            hwnd = NULL;
-        }
-    }
-};
-
-// Helper function to set browser on CEFView (defined after CEFView class)
-void SetBrowserOnCEFView(HWND parentWindow, CefRefPtr<CefBrowser> browser) {
-    auto viewIt = g_cefViews.find(parentWindow);
-    if (viewIt != g_cefViews.end()) {
-        auto view = static_cast<CEFView*>(viewIt->second);
-        if (view) {
-            view->setBrowser(browser);
-            
-            // Trigger an immediate resize to bring CEF browser to front
-            // The resize method will handle the z-ordering
-            RECT currentBounds = view->visualBounds;
-            view->resize(currentBounds, nullptr);
-        }
-    }
-}
 
 // Helper function to set webview on WebView2View (defined after WebView2View class)
 void SetWebViewOnWebView2View(HWND containerWindow, void* webview) {
@@ -4257,13 +1704,9 @@ private:
                 
                 // For WebView2, try to get actual bounds
                 auto webview2 = std::dynamic_pointer_cast<WebView2View>(view);
-                auto cefView = std::dynamic_pointer_cast<CEFView>(view);
                 
                 if (webview2 && webview2->getController()) {
                     webview2->getController()->get_Bounds(&viewBounds);
-                } else if (cefView && cefView->getBrowser()) {
-                    // For CEF, use the visualBounds which are set by resize
-                    viewBounds = view->visualBounds;
                 }
                 
                 if (PtInRect(&viewBounds, mousePos)) {
@@ -4350,27 +1793,6 @@ private:
         EnumChildWindows(m_hwnd, EnumChildCallback, (LPARAM)&enumData);
     }
     
-    void BringCEFChildWindowToFront(AbstractView* view) {
-        // Cast to CEFView to access browser
-        auto cefView = dynamic_cast<CEFView*>(view);
-        if (!cefView || !cefView->getBrowser()) return;
-        
-        CefRefPtr<CefBrowser> browser = cefView->getBrowser();
-        if (!browser) return;
-        
-        // Get the CEF browser's window handle
-        HWND browserHwnd = browser->GetHost()->GetWindowHandle();
-        if (!browserHwnd) return;
-        
-        // char logMsg[256];
-        // sprintf_s(logMsg, "BringCEFChildWindowToFront: Bringing CEF browser HWND=%p to front", browserHwnd);
-        // ::log(logMsg);
-        
-        // Bring the CEF browser window to front
-        SetWindowPos(browserHwnd, HWND_TOP, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    }
-
 public:
     ContainerView(HWND parentWindow) : m_parentWindow(parentWindow), m_hwnd(NULL) {
         // Double-check parent window is valid
@@ -4506,12 +1928,9 @@ public:
             
             // Bring the appropriate child window to front
             auto webview2 = dynamic_cast<WebView2View*>(view.get());
-            auto cefView = dynamic_cast<CEFView*>(view.get());
             
             if (webview2) {
                 BringWebView2ChildWindowToFront(view.get());
-            } else if (cefView) {
-                BringCEFChildWindowToFront(view.get());
             } else if (view->hwnd) {
                 SetWindowPos(view->hwnd, HWND_TOP, 0, 0, 0, 0,
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -4521,9 +1940,6 @@ public:
     
     ~ContainerView() {
         // Explicitly remove each view before destroying HWNDs.
-        // This lets CEFView::remove() defer CloseBrowser via dispatch_async
-        // instead of ~CEFView() calling CloseBrowser(true) synchronously
-        // on an already-destroyed HWND (which would crash).
         for (auto& view : m_abstractViews) {
             g_pendingResizeQueue.remove(view.get());
             view->remove();
@@ -4545,8 +1961,7 @@ public:
         m_abstractViews.insert(m_abstractViews.begin(), view); 
         BringViewToFront(view->webviewId);
         
-        // TODO: Temporarily disable mirror mode for CEF testing
-        // Start new webviews in mirror mode (input disabled)
+        // TODO: Start new webviews in mirror mode (input disabled)
         // They will be made interactive when mouse hovers over them
         // view->toggleMirrorMode(true);
     }
@@ -4630,6 +2045,7 @@ typedef struct {
     WindowFocusHandler focusHandler;
     WindowBlurHandler blurHandler;
     WindowKeyHandler keyHandler;
+    ChromeStyle chromeStyle;
 } WindowData;
 
 
@@ -4767,7 +2183,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     WindowData* data = (WindowData*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
     
     switch (msg) {
-        
+        case WM_NCCALCSIZE:
+            if (wParam == TRUE && data && data->chromeStyle == ChromeStyle::HiddenInset) {
+                NCCALCSIZE_PARAMS* p = (NCCALCSIZE_PARAMS*)lParam;
+                RECT original = p->rgrc[0];
+                LRESULT ret = DefWindowProc(hwnd, msg, wParam, lParam);
+                if (IsZoomed(hwnd)) {
+                    // Maximized: clip client area to monitor work area so
+                    // we still strip the caption bar without pushing content
+                    // above the visible screen.
+                    MONITORINFO mi = { sizeof(MONITORINFO) };
+                    HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                    if (GetMonitorInfo(hmon, &mi)) {
+                        p->rgrc[0].top = mi.rcWork.top;
+                    }
+                } else {
+                    p->rgrc[0].top = original.top;
+                }
+                return ret;
+            }
+            break;
+
         case WM_INPUT: {
             if (g_isMovingWindow && g_targetWindow) {
                 UINT dwSize = 0;
@@ -4815,18 +2251,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         case WM_NCHITTEST:
-            {
-                // For layered windows, we need to handle hit testing to receive mouse events
-                // Check if this is a CEF OSR window
-                auto viewIt = g_cefViews.find(hwnd);
-                if (viewIt != g_cefViews.end()) {
-                    auto cefView = static_cast<CEFView*>(viewIt->second);
-                    if (cefView && cefView->isOSRMode()) {
-                        // Return HTCLIENT to indicate this is the client area and should receive mouse events
-                        return HTCLIENT;
-                    }
-                }
-            }
             break;
 
         case WM_COMMAND:
@@ -4838,7 +2262,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             break;
 
-        // Forward mouse and keyboard events to CEF OSR view if present
         case WM_MOUSEMOVE:
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
@@ -4854,18 +2277,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_SYSKEYUP:
         case WM_SYSCHAR:
             {
-                // Check if this window has a CEF OSR view
-                auto viewIt = g_cefViews.find(hwnd);
-                if (viewIt != g_cefViews.end()) {
-                    auto cefView = static_cast<CEFView*>(viewIt->second);
-                    if (cefView && cefView->isOSRMode()) {
-                        if (msg == WM_LBUTTONDOWN) {
-                            printf("WindowProc: WM_LBUTTONDOWN received for OSR window\n");
-                        }
-                        cefView->HandleWindowMessage(msg, wParam, lParam);
-                    }
-                }
-
                 // Dispatch keyboard events to keyHandler callback
                 if (data && data->keyHandler &&
                     (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP)) {
@@ -5725,140 +3136,6 @@ HMENU createApplicationMenuFromConfig(const SimpleJsonValue& menuConfig, StatusI
 
 
 
-// Helper function to terminate all CEF helper processes
-void TerminateCEFHelperProcesses() {
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE) {
-        return;
-    }
-    
-    PROCESSENTRY32W pe32;
-    pe32.dwSize = sizeof(PROCESSENTRY32W);
-    
-    if (Process32FirstW(hSnapshot, &pe32)) {
-        do {
-            // Check if this is a "bun Helper.exe" process
-            if (wcsstr(pe32.szExeFile, L"bun Helper.exe") != nullptr) {
-                HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pe32.th32ProcessID);
-                if (hProcess != nullptr) {
-                    std::wcout << L"[CEF] Terminating helper process: " << pe32.szExeFile 
-                              << L" (PID: " << pe32.th32ProcessID << L")" << std::endl;
-                    TerminateProcess(hProcess, 0);
-                    CloseHandle(hProcess);
-                }
-            }
-        } while (Process32NextW(hSnapshot, &pe32));
-    }
-    
-    CloseHandle(hSnapshot);
-}
-
-ELECTROBUN_EXPORT bool initCEF() {
-    if (g_cef_initialized) {
-        return true; // Already initialized
-    }
-    
-    // Create a job object to track all child processes
-    if (!g_job_object) {
-        g_job_object = CreateJobObject(nullptr, nullptr);
-        if (g_job_object) {
-            // Configure the job object to terminate all child processes when the main process exits
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {0};
-            jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(g_job_object, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
-            
-            // Assign the current process to the job object
-            // This ensures all child processes (CEF helpers) are part of this job
-            AssignProcessToJobObject(g_job_object, GetCurrentProcess());
-            std::cout << "[CEF] Created job object for process tracking" << std::endl;
-        }
-    }
-
-    // Get the directory where the current executable is located
-    char exePath[MAX_PATH];
-    GetModuleFileNameA(NULL, exePath, MAX_PATH);
-    char* lastSlash = strrchr(exePath, '\\');
-    if (lastSlash) {
-        *lastSlash = '\0'; // Remove the executable name
-    }
-
-    // Set up CEF paths (resources are in ./cef relative to executable)
-    std::string cefResourceDir = std::string(exePath) + "\\cef";
-
-    // Build cache path with identifier/channel structure (consistent with CLI and updater)
-    // Use %LOCALAPPDATA%\{identifier}\{channel}\CEF
-    std::string userDataDir;
-    char* localAppData = getenv("LOCALAPPDATA");
-    if (localAppData) {
-        userDataDir = buildAppDataPath(localAppData, g_electrobunIdentifier, g_electrobunChannel, "CEF", '\\');
-        std::cout << "[CEF] Using path: " << userDataDir << std::endl;
-    } else {
-        // Fallback to executable directory if LOCALAPPDATA not available
-        userDataDir = buildAppDataPath(exePath, g_electrobunIdentifier, g_electrobunChannel, "cef_cache", '\\');
-    }
-
-    // Create cache directory if it doesn't exist
-    CreateDirectoryA(userDataDir.c_str(), NULL);
-
-    // Initialize CEF
-    CefMainArgs main_args(GetModuleHandle(NULL));
-    
-    // Create the app
-    g_cef_app = new ElectrobunCefApp();
-
-    // Read user-defined chromium flags from build.json
-    std::string buildJsonPath = std::string(exePath) + "\\..\\Resources\\build.json";
-    std::string buildJsonContent = electrobun::readFileToString(buildJsonPath);
-    if (!buildJsonContent.empty()) {
-        g_userChromiumFlags = electrobun::parseChromiumFlags(buildJsonContent);
-    }
-
-    // CEF settings
-    CefSettings settings;
-    settings.no_sandbox = true;
-    settings.multi_threaded_message_loop = false;
-    settings.external_message_pump = true; // We pump CEF via OnScheduleMessagePumpWork
-    settings.windowless_rendering_enabled = true; // Required for OSR/transparent windows
-
-    // Remote DevTools port with scan for availability
-    int selectedPort = FindAvailableRemoteDebugPort(9222, 9232);
-    if (selectedPort == 0) {
-        selectedPort = 9222;
-        std::cout << "[CEF] Remote DevTools: no free port in 9222-9232, falling back to 9222" << std::endl;
-    }
-    g_remoteDebugPort = selectedPort;
-    settings.remote_debugging_port = selectedPort;
-
-    // Set the subprocess path to the helper executable
-    CefString(&settings.browser_subprocess_path) = std::string(exePath) + "\\bun Helper.exe";
-    
-    // Set paths - icudtl.dat and .pak files are in cef directory root
-    CefString(&settings.resources_dir_path) = cefResourceDir;
-    CefString(&settings.locales_dir_path) = cefResourceDir + "\\Resources\\locales";
-    CefString(&settings.cache_path) = userDataDir;
-    
-    // Add language settings like macOS
-    CefString(&settings.accept_language_list) = "en-US,en";
-    
-    // Set minimal logging
-    settings.log_severity = LOGSEVERITY_ERROR;
-    CefString(&settings.log_file) = "";
-    
-    
-    bool success = CefInitialize(main_args, settings, g_cef_app.get(), nullptr);
-    if (success) {
-        g_cef_initialized = true;
-        // Register the views:// scheme handler factory
-        CefRegisterSchemeHandlerFactory("views", "", new ElectrobunSchemeHandlerFactory());
-        
-        // We'll start the message pump timer when we create the first browser
-    } else {
-        ::log("Failed to initialize CEF");
-    }
-    
-    return success;
-}
-
 // Internal factory method for creating WebView2 instances
 static std::shared_ptr<WebView2View> createWebView2View(uint32_t webviewId,
                                                  HWND hwnd,
@@ -5963,15 +3240,18 @@ static std::shared_ptr<WebView2View> createWebView2View(uint32_t webviewId,
                     return result;
                 }
                 
-                // Create WebView2 controller - MINIMAL VERSION
+                // Create WebView2 controller
+                // When DComp is active, use CreateCoreWebView2CompositionController
+                // so WebView2 renders into a DComp visual (enabling GPU layering).
+                // Otherwise, use standard CreateCoreWebView2Controller.
                 HWND targetHwnd = container->GetHwnd();
-                
+
                 if (!IsWindow(targetHwnd)) {
                     ::log("ERROR: Target window is no longer valid");
                     view->setCreationFailed(true);
                     return S_OK;
                 }
-                
+
                 return env->CreateCoreWebView2Controller(targetHwnd,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [view, container, x, y, width, height, env, transparent](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
@@ -6054,7 +3334,7 @@ static std::shared_ptr<WebView2View> createWebView2View(uint32_t webviewId,
                                         // ::log("[WebView2] Request URI converted successfully");
                                         
                                         if (uriStr.substr(0, 8) == "views://") {
-                                            std::string filePath = uriStr.substr(8);
+                                            std::string filePath = normalizeViewsRelativePath(uriStr);
                                             std::string content;
 
                                             // Check for internal/index.html (inline HTML content)
@@ -6136,7 +3416,7 @@ static std::shared_ptr<WebView2View> createWebView2View(uint32_t webviewId,
                                 }
                                 // Resolve views:// URLs to file content (matching macOS behavior)
                                 if (view->customScript.substr(0, 8) == "views://") {
-                                    std::string fileContent = loadViewsFile(view->customScript.substr(8));
+                                    std::string fileContent = loadViewsFile(normalizeViewsRelativePath(view->customScript));
                                     if (!fileContent.empty()) {
                                         combinedScript += fileContent;
                                     } else {
@@ -6642,257 +3922,6 @@ static std::shared_ptr<WebView2View> createWebView2View(uint32_t webviewId,
     return view;
 }
 
-// Utility function for creating CEF request contexts with partition support
-CefRefPtr<CefRequestContext> CreateRequestContextForPartition(const char* partitionIdentifier,
-                                                               uint32_t webviewId) {
-    printf("DEBUG CEF: CreateRequestContextForPartition called for webview %u, partition: %s\n",
-           webviewId, partitionIdentifier ? partitionIdentifier : "null");
-
-    CefRequestContextSettings settings;
-
-    if (!partitionIdentifier || !partitionIdentifier[0]) {
-        // No partition - use in-memory session
-        settings.persist_session_cookies = false;
-    } else {
-        std::string identifier(partitionIdentifier);
-        bool isPersistent = identifier.substr(0, 8) == "persist:";
-
-        if (isPersistent) {
-            // Persistent partition - create cache directory
-            std::string partitionName = identifier.substr(8);
-
-            // Get %LOCALAPPDATA% path
-            char* localAppData = getenv("LOCALAPPDATA");
-            if (!localAppData) {
-                printf("ERROR CEF: LOCALAPPDATA not found, falling back to in-memory session\n");
-                settings.persist_session_cookies = false;
-            } else {
-                // Build path with identifier/channel structure (consistent with CLI and updater)
-                // Structure: %LOCALAPPDATA%\{identifier}\{channel}\CEF\Partitions\{partitionName}
-                std::string cachePath = buildPartitionPath(localAppData, g_electrobunIdentifier, g_electrobunChannel, "CEF", partitionName, '\\');
-
-                // Create directory if it doesn't exist
-                std::wstring wideCachePath(cachePath.begin(), cachePath.end());
-                SHCreateDirectoryExW(NULL, wideCachePath.c_str(), NULL);
-
-                settings.persist_session_cookies = true;
-                CefString(&settings.cache_path).FromString(cachePath);
-
-                printf("DEBUG CEF: Persistent partition '%s' using cache path: %s\n",
-                       partitionName.c_str(), cachePath.c_str());
-            }
-        } else {
-            // Non-persistent partition - in-memory session
-            settings.persist_session_cookies = false;
-            printf("DEBUG CEF: In-memory partition '%s'\n", identifier.c_str());
-        }
-    }
-
-    // Create the request context
-    CefRefPtr<CefRequestContext> context = CefRequestContext::CreateContext(settings, nullptr);
-
-    // Register scheme handler factory for this request context
-    // Note: Each CefRequestContext needs its own registration - it's not global
-    static CefRefPtr<ElectrobunSchemeHandlerFactory> schemeFactory = new ElectrobunSchemeHandlerFactory();
-    bool registered = context->RegisterSchemeHandlerFactory("views", "", schemeFactory);
-    printf("DEBUG CEF: Registered scheme handler factory for partition '%s' - success: %s\n",
-           partitionIdentifier ? partitionIdentifier : "(default)", registered ? "yes" : "no");
-
-    return context;
-}
-
-// Internal factory method for creating CEF instances
-static std::shared_ptr<CEFView> createCEFView(uint32_t webviewId,
-                                       HWND hwnd,
-                                       const char *url,
-                                       double x, double y,
-                                       double width, double height,
-                                       bool autoResize,
-                                       const char *partitionIdentifier,
-                                       DecideNavigationCallback navigationCallback,
-                                       WebviewEventHandler webviewEventHandler,
-                                       HandlePostMessage eventBridgeHandler,
-                                       HandlePostMessage bunBridgeHandler,
-                                       HandlePostMessage internalBridgeHandler,
-                                       const char *electrobunPreloadScript,
-                                       const char *customPreloadScript,
-                                       bool transparent,
-                                       bool sandbox) {
-    
-    auto view = std::make_shared<CEFView>(webviewId);
-    view->hwnd = hwnd;
-    view->fullSize = autoResize;
-    
-    // Initialize CEF on main thread
-    bool cefInitResult = MainThreadDispatcher::dispatch_sync([=]() -> bool {
-        return initCEF();
-    });
-    
-    if (!cefInitResult) {
-        ::log("ERROR: Failed to initialize CEF");
-        return view;
-    }
-    
-    // CEF browser creation logic
-    MainThreadDispatcher::dispatch_sync([=]() {
-        auto container = GetOrCreateContainer(hwnd);
-        if (!container) {
-            ::log("ERROR: Failed to create container");
-            return;
-        }
-        
-        // Create CEF browser info
-        CefWindowInfo windowInfo;
-        windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-        CefRect cefBounds((int)x, (int)y, (int)width, (int)height);
-
-        CefBrowserSettings browserSettings;
-        // Note: web_security setting for CEF would need correct API
-
-        // Set transparent background if requested
-        if (transparent) {
-            // CEF uses ARGB format: 0x00000000 = fully transparent
-            browserSettings.background_color = 0;
-        }
-
-        // Create CEF client with bridge handlers
-        auto client = new ElectrobunCefClient(webviewId, eventBridgeHandler, bunBridgeHandler, internalBridgeHandler, sandbox);
-
-        // Configure OSR mode for transparent windows
-        if (transparent) {
-            // Enable OSR mode
-            client->EnableOSR((int)width, (int)height);
-
-            // Create OSR window for rendering
-            // For OSR, the window should fill the parent window's client area (0, 0)
-            OSRWindow* osrWindow = new OSRWindow(hwnd, 0, 0, (int)width, (int)height);
-            view->setOSRWindow(osrWindow);
-            client->SetOSRWindow(osrWindow);
-
-            // Use windowless (off-screen) rendering
-            windowInfo.SetAsWindowless(hwnd);
-        } else {
-            // Use windowed mode
-            windowInfo.SetAsChild(container->GetHwnd(), cefBounds);
-        }
-        
-        // Set up preload scripts
-        if (electrobunPreloadScript && strlen(electrobunPreloadScript) > 0) {
-            client->AddPreloadScript(std::string(electrobunPreloadScript));
-        }
-        if (customPreloadScript && strlen(customPreloadScript) > 0) {
-            client->UpdateCustomPreloadScript(std::string(customPreloadScript));
-        }
-        
-        // Set the webview event handler for ctrl+click handling
-        client->SetWebviewEventHandler(webviewEventHandler);
-
-        // Set the abstract view pointer for navigation rules
-        client->SetAbstractView(view.get());
-
-        view->setClient(client);
-
-        // Set up load-end callback for deferred transparency/passthrough application
-        // CEF navigation events can reset window state, so we re-apply after page load
-        CEFView* viewPtr = view.get();
-        client->SetLoadEndCallback([viewPtr]() {
-            if (viewPtr->pendingStartTransparent) {
-                viewPtr->setTransparent(true);
-                viewPtr->pendingStartTransparent = false;
-            }
-            if (viewPtr->pendingStartPassthrough) {
-                viewPtr->setPassthrough(true);
-                viewPtr->pendingStartPassthrough = false;
-            }
-            // Re-apply passthrough if it was already set (in case navigation reset it)
-            if (viewPtr->isMousePassthroughEnabled && !viewPtr->pendingStartPassthrough) {
-                viewPtr->setPassthrough(true);
-            }
-        });
-
-        // Create request context for partition isolation
-        CefRefPtr<CefRequestContext> requestContext = CreateRequestContextForPartition(
-            partitionIdentifier,
-            webviewId
-        );
-
-        // Create browser synchronously (like Mac implementation)
-        // Note: OnLoadStart will fire during this call, but the load handler has a direct
-        // reference to the client, so preload scripts are available immediately without race condition
-
-        // Pass sandbox flag to renderer process via extra_info
-        CefRefPtr<CefDictionaryValue> extra_info = CefDictionaryValue::Create();
-        extra_info->SetBool("sandbox", sandbox);
-
-        CefRefPtr<CefBrowser> browser = CefBrowserHost::CreateBrowserSync(
-            windowInfo, client, url ? url : "about:blank", browserSettings, extra_info, requestContext);
-
-        if (browser) {
-            // Store preload script by browser ID for compatibility with other code paths
-            std::string combinedScript = client->GetCombinedScript();
-            if (!combinedScript.empty()) {
-                g_preloadScripts[browser->GetIdentifier()] = combinedScript;
-            }
-
-            // Map browser ID to webview ID for CEF scheme handler
-            {
-                std::lock_guard<std::mutex> lock(browserMapMutex);
-                browserToWebviewMap[browser->GetIdentifier()] = webviewId;
-            }
-
-            // Set browser on view immediately since we have it synchronously
-            view->setBrowser(browser);
-
-            // Track browser in global map
-            g_cefBrowsers[browser->GetIdentifier()] = browser;
-            g_browser_count++;
-
-            container->AddAbstractView(view);
-
-            // Register in global AbstractView map for navigation rules
-            {
-                std::lock_guard<std::mutex> lock(g_abstractViewsMutex);
-                g_abstractViews[view->webviewId] = view.get();
-            }
-
-            // Add client to global map
-            // For OSR mode, use the main window hwnd; for normal mode, use container hwnd
-            HWND containerHwnd = container->GetHwnd();
-            HWND mapKey = transparent ? hwnd : containerHwnd;
-
-            g_cefClients[mapKey] = client;
-            g_cefViews[mapKey] = view.get();
-
-            printf("CEF: Registered view with hwnd=%p (transparent=%d)\n", mapKey, transparent);
-
-            // Set browser on client for script execution
-            client->SetBrowser(browser);
-
-            // Set initial bounds on view before calling resize
-            RECT initialBounds = {(LONG)x, (LONG)y, (LONG)(x + width), (LONG)(y + height)};
-            view->visualBounds = initialBounds;
-
-            // Handle z-ordering immediately since browser is ready
-            view->resize(initialBounds, nullptr);
-
-            // Apply deferred initial transparent/passthrough state now that browser is ready
-            // Note: We apply immediately here, but also have a load-end callback to re-apply
-            // after page load completes (since CEF navigation can reset window state)
-            if (view->pendingStartTransparent) {
-                view->setTransparent(true);
-                // Don't clear yet - load-end callback will handle it after page loads
-            }
-            if (view->pendingStartPassthrough) {
-                view->setPassthrough(true);
-                // Don't clear yet - load-end callback will handle it after page loads
-            }
-
-        }
-    });
-
-    return view;
-}
-
 // Console control handler for graceful shutdown
 BOOL WINAPI ConsoleControlHandler(DWORD dwCtrlType) {
     switch (dwCtrlType) {
@@ -6927,7 +3956,6 @@ extern "C" {
 ELECTROBUN_EXPORT void startEventLoop(const char* identifier, const char* name, const char* channel) {
     g_mainThreadId = GetCurrentThreadId();
 
-    // Store identifier, name, and channel globally for use in CEF initialization
     if (identifier && identifier[0]) {
         g_electrobunIdentifier = std::string(identifier);
     }
@@ -6940,7 +3968,7 @@ ELECTROBUN_EXPORT void startEventLoop(const char* identifier, const char* name, 
 
     // Set up console control handler for graceful shutdown on Ctrl+C
     if (!SetConsoleCtrlHandler(ConsoleControlHandler, TRUE)) {
-        std::cout << "[CEF] Warning: Failed to set console control handler" << std::endl;
+        std::cout << "[shutdown] Warning: Failed to set console control handler" << std::endl;
     }
     
     // Create a hidden message-only window for dispatching
@@ -6963,84 +3991,17 @@ ELECTROBUN_EXPORT void startEventLoop(const char* identifier, const char* name, 
     // Initialize the dispatcher
     MainThreadDispatcher::initialize(messageWindow);
     
-    // Initialize CEF if available
-    if (isCEFAvailable()) {
-        if (initCEF()) {
-            // With external_message_pump=true, CefDoMessageLoopWork does NOT
-            // internally pump Windows messages. This prevents CEF from stealing
-            // WebView2 messages while still processing CEF work on a timer.
-            //
-            // OnScheduleMessagePumpWork posts WM_CEF_SCHEDULE_WORK for immediate
-            // work and uses SetTimer for delayed work. We also keep a baseline
-            // timer to ensure CEF always gets serviced.
-            WNDCLASSA cefPumpWc = {0};
-            cefPumpWc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
-                if (msg == WM_CEF_SCHEDULE_WORK || msg == WM_TIMER) {
-                    CefDoMessageLoopWork();
-                    return 0;
-                }
-                return DefWindowProc(hwnd, msg, wParam, lParam);
-            };
-            cefPumpWc.hInstance = GetModuleHandle(NULL);
-            cefPumpWc.lpszClassName = "CefPumpWindowClass";
-            RegisterClassA(&cefPumpWc);
-            g_cefPumpWindow = CreateWindowA("CefPumpWindowClass", "", 0, 0, 0, 0, 0,
-                                           HWND_MESSAGE, NULL, GetModuleHandle(NULL), NULL);
-
-            // Baseline timer ensures CEF always gets serviced even if
-            // OnScheduleMessagePumpWork misses a beat
-            SetTimer(g_cefPumpWindow, 2, 16, nullptr);
-
-            // Kick off initial CEF work
-            CefDoMessageLoopWork();
-
-            // Standard Windows message loop
-            MSG msg;
-            while (GetMessage(&msg, NULL, 0, 0)) {
-                if (g_hAccelTable && TranslateAccelerator(msg.hwnd, g_hAccelTable, &msg)) {
-                    continue;
-                }
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-            // Clean up after shutdown
-            std::cout << "[CEF] CEF message loop ended, performing cleanup..." << std::endl;
-            TerminateCEFHelperProcesses();
-
-            // Close job object
-            if (g_job_object) {
-                CloseHandle(g_job_object);
-                g_job_object = nullptr;
-            }
-
-            CefShutdown();
-            g_shutdownComplete.store(true);
-        } else {
-            // Fall back to Windows message loop if CEF init fails
-            MSG msg;
-            while (GetMessage(&msg, NULL, 0, 0)) {
-                // Check for menu accelerators first
-                if (g_hAccelTable && TranslateAccelerator(msg.hwnd, g_hAccelTable, &msg)) {
-                    continue;
-                }
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-            g_shutdownComplete.store(true);
+    // Standard Windows message loop
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        // Check for menu accelerators first
+        if (g_hAccelTable && TranslateAccelerator(msg.hwnd, g_hAccelTable, &msg)) {
+            continue;
         }
-    } else {
-        // Use Windows message loop if CEF is not available
-        MSG msg;
-        while (GetMessage(&msg, NULL, 0, 0)) {
-            // Check for menu accelerators first
-            if (g_hAccelTable && TranslateAccelerator(msg.hwnd, g_hAccelTable, &msg)) {
-                continue;
-            }
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        g_shutdownComplete.store(true);
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
+    g_shutdownComplete.store(true);
 }
 
 
@@ -7051,16 +4012,9 @@ ELECTROBUN_EXPORT void stopEventLoop() {
 
     std::cout << "[stopEventLoop] Initiating clean event loop exit" << std::endl;
 
-    if (isCEFAvailable() && g_cef_initialized) {
-        // We use a standard Windows message loop (not CefRunMessageLoop),
-        // so PostQuitMessage is the correct way to exit.
-        PostQuitMessage(0);
-    } else {
-        // Post WM_QUIT to the main thread's message queue
-        if (g_mainThreadId != 0) {
+    if (g_mainThreadId != 0) {
             PostThreadMessage(g_mainThreadId, WM_QUIT, 0, 0);
         }
-    }
 }
 
 ELECTROBUN_EXPORT void killApp() {
@@ -7125,7 +4079,7 @@ ELECTROBUN_EXPORT AbstractView* initWebview(uint32_t webviewId,
     bool startPassthrough = g_nextWebviewFlags.startPassthrough;
     g_nextWebviewFlags = {false, false};
 
-    // Serialize webview creation to avoid CEF/WebView2 conflicts
+    // Serialize webview creation
     std::lock_guard<std::mutex> lock(g_webviewCreationMutex);
 
 
@@ -7134,19 +4088,11 @@ ELECTROBUN_EXPORT AbstractView* initWebview(uint32_t webviewId,
     // Factory pattern - choose implementation based on renderer
     AbstractView* view = nullptr;
 
-    if (renderer && strcmp(renderer, "cef") == 0 && isCEFAvailable()) {
-        auto cefView = createCEFView(webviewId, hwnd, url, x, y, width, height, autoResize,
-                                    partitionIdentifier, navigationCallback, webviewEventHandler,
-                                    eventBridgeHandler, bunBridgeHandler, internalBridgeHandler,
-                                    electrobunPreloadScript, customPreloadScript, transparent, sandbox);
-        view = cefView.get();
-    } else {
-        auto webview2View = createWebView2View(webviewId, hwnd, url, x, y, width, height, autoResize,
-                                              partitionIdentifier, navigationCallback, webviewEventHandler,
-                                              eventBridgeHandler, bunBridgeHandler, internalBridgeHandler,
-                                              electrobunPreloadScript, customPreloadScript, transparent, sandbox);
-        view = webview2View.get();
-    }
+    auto webview2View = createWebView2View(webviewId, hwnd, url, x, y, width, height, autoResize,
+                                          partitionIdentifier, navigationCallback, webviewEventHandler,
+                                          eventBridgeHandler, bunBridgeHandler, internalBridgeHandler,
+                                          electrobunPreloadScript, customPreloadScript, transparent, sandbox);
+    view = webview2View.get();
 
     // Note: Object lifetime is managed by the ContainerView which holds shared_ptr references
     // The factories add the views to containers, so they remain alive after this function returns
@@ -7160,88 +4106,6 @@ ELECTROBUN_EXPORT AbstractView* initWebview(uint32_t webviewId,
 
     return view;
 
-}
-
-ELECTROBUN_EXPORT AbstractView* initWGPUView(uint32_t webviewId,
-                         NSWindow *window,  // Actually HWND on Windows
-                         double x, double y,
-                         double width, double height,
-                         bool autoResize,
-                         bool startTransparent,
-                         bool startPassthrough) {
-
-    HWND hwnd = reinterpret_cast<HWND>(window);
-    if (!IsWindow(hwnd)) {
-        ::log("ERROR: initWGPUView called with invalid window handle");
-        return nullptr;
-    }
-
-    auto view = std::make_shared<WGPUView>(webviewId);
-    view->fullSize = autoResize;
-
-    // Create both container and WGPUView child on the main thread to avoid
-    // cross-thread child window deadlock (container on FFI thread + child on
-    // main thread would deadlock because CreateWindowExA sends messages to
-    // the parent's thread which is blocked on dispatch_sync).
-    ContainerView* container = nullptr;
-    MainThreadDispatcher::dispatch_sync([&container, view, hwnd, x, y, width, height, startTransparent, startPassthrough]() {
-        // Get or create container on main thread
-        container = GetOrCreateContainer(hwnd);
-        if (!container) {
-            ::log("ERROR: Failed to create container for WGPUView");
-            return;
-        }
-
-        HWND containerHwnd = container->GetHwnd();
-        if (!IsWindow(containerHwnd)) {
-            ::log("ERROR: Container window handle invalid for WGPUView");
-            return;
-        }
-
-        view->hwnd = CreateWindowExA(
-            0,
-            "STATIC",
-            "",
-            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-            (int)x,
-            (int)y,
-            (int)width,
-            (int)height,
-            containerHwnd,
-            NULL,
-            GetModuleHandle(NULL),
-            NULL
-        );
-
-        if (!view->hwnd) {
-            ::log("ERROR: Failed to create WGPUView child window");
-            return;
-        }
-
-        RECT bounds = {(LONG)x, (LONG)y, (LONG)(x + width), (LONG)(y + height)};
-        view->visualBounds = bounds;
-
-        if (startTransparent) {
-            view->setTransparent(true);
-        }
-        if (startPassthrough) {
-            view->setPassthrough(true);
-        }
-    });
-
-    if (!container) {
-        ::log("ERROR: initWGPUView dispatch_sync completed but container is null");
-        return nullptr;
-    }
-
-    container->AddAbstractView(view);
-
-    {
-        std::lock_guard<std::mutex> lock(g_abstractViewsMutex);
-        g_abstractViews[webviewId] = view.get();
-    }
-
-    return view.get();
 }
 
 ELECTROBUN_EXPORT MyScriptMessageHandlerWithReply* addScriptMessageHandlerWithReply(WKWebView *webView,
@@ -7263,1038 +4127,6 @@ ELECTROBUN_EXPORT void loadURLInWebView(AbstractView *abstractView, const char *
     // Use virtual method which handles threading and implementation details
     
     abstractView->loadURL(urlString);
-}
-
-ELECTROBUN_EXPORT void wgpuViewSetFrame(AbstractView *abstractView, double x, double y, double width, double height) {
-    if (!abstractView) return;
-    RECT bounds = {(LONG)x, (LONG)y, (LONG)(x + width), (LONG)(y + height)};
-    abstractView->storePendingResize(bounds, "");
-    g_pendingResizeQueue.enqueue(abstractView);
-    schedulePendingResizeDrain();
-}
-
-ELECTROBUN_EXPORT void wgpuViewSetTransparent(AbstractView *abstractView, BOOL transparent) {
-    if (!abstractView) return;
-    MainThreadDispatcher::dispatch_sync([abstractView, transparent]() {
-        abstractView->setTransparent(transparent);
-    });
-}
-
-ELECTROBUN_EXPORT void wgpuViewSetPassthrough(AbstractView *abstractView, BOOL enablePassthrough) {
-    if (!abstractView) return;
-    MainThreadDispatcher::dispatch_sync([abstractView, enablePassthrough]() {
-        abstractView->setPassthrough(enablePassthrough);
-    });
-}
-
-ELECTROBUN_EXPORT void wgpuViewSetHidden(AbstractView *abstractView, BOOL hidden) {
-    if (!abstractView) return;
-    MainThreadDispatcher::dispatch_sync([abstractView, hidden]() {
-        abstractView->setHidden(hidden);
-    });
-}
-
-ELECTROBUN_EXPORT void wgpuViewRemove(AbstractView *abstractView) {
-    if (!abstractView) return;
-    uint32_t viewId = abstractView->webviewId;
-    MainThreadDispatcher::dispatch_sync([abstractView]() {
-        abstractView->remove();
-    });
-    {
-        std::lock_guard<std::mutex> lock(g_abstractViewsMutex);
-        g_abstractViews.erase(viewId);
-    }
-}
-
-ELECTROBUN_EXPORT void* wgpuViewGetNativeHandle(AbstractView *abstractView) {
-    if (!abstractView) return nullptr;
-    return abstractView->hwnd;
-}
-
-// ----------------------- WGPU Main-Thread Shims -----------------------
-
-typedef void* (*PFN_wgpuInstanceCreateSurface)(void* instance, const void* descriptor);
-typedef void (*PFN_wgpuSurfaceConfigure)(void* surface, const void* config);
-typedef void (*PFN_wgpuSurfaceGetCurrentTexture)(void* surface, void* surfaceTexture);
-typedef int32_t (*PFN_wgpuSurfacePresent)(void* surface);
-typedef WGPUFuture (*PFN_wgpuQueueOnSubmittedWorkDone)(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo callbackInfo);
-typedef WGPUFuture (*PFN_wgpuBufferMapAsync)(WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size, WGPUBufferMapCallbackInfo callbackInfo);
-typedef WGPUWaitStatus (*PFN_wgpuInstanceWaitAny)(WGPUInstance instance, size_t futureCount, WGPUFutureWaitInfo* futures, uint64_t timeoutNS);
-typedef void* (*PFN_wgpuBufferGetMappedRange)(WGPUBuffer buffer, size_t offset, size_t size);
-typedef void* (*PFN_wgpuBufferGetConstMappedRange)(WGPUBuffer buffer, size_t offset, size_t size);
-typedef void (*PFN_wgpuBufferUnmap)(WGPUBuffer buffer);
-
-static HMODULE wgpuLibHandle = nullptr;
-static PFN_wgpuInstanceCreateSurface p_wgpuInstanceCreateSurface = nullptr;
-static PFN_wgpuSurfaceConfigure p_wgpuSurfaceConfigure = nullptr;
-static PFN_wgpuSurfaceGetCurrentTexture p_wgpuSurfaceGetCurrentTexture = nullptr;
-static PFN_wgpuSurfacePresent p_wgpuSurfacePresent = nullptr;
-static PFN_wgpuQueueOnSubmittedWorkDone p_wgpuQueueOnSubmittedWorkDone = nullptr;
-static PFN_wgpuBufferMapAsync p_wgpuBufferMapAsync = nullptr;
-static PFN_wgpuInstanceWaitAny p_wgpuInstanceWaitAny = nullptr;
-static PFN_wgpuBufferGetMappedRange p_wgpuBufferGetMappedRange = nullptr;
-static PFN_wgpuBufferGetConstMappedRange p_wgpuBufferGetConstMappedRange = nullptr;
-static PFN_wgpuBufferUnmap p_wgpuBufferUnmap = nullptr;
-
-// ----------------------- WGPU GPU Test (native cube) -----------------------
-
-// Helper for formatted WGPU test logging
-// Uses fprintf(stderr) + fflush for immediate visibility, plus the normal log() for file output
-static void wgpu_log(const char* fmt, ...) {
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    fprintf(stderr, "[WGPU] %s\n", buf);
-    fflush(stderr);
-    std::cout << "[WGPU] " << buf << std::endl;
-    std::cout.flush();
-}
-
-// Additional typedefs for the GPU test (matches macOS reference)
-typedef WGPUInstance (*PFN_wgpuCreateInstance)(WGPUInstanceDescriptor const* descriptor);
-typedef WGPUFuture (*PFN_wgpuInstanceRequestAdapter)(WGPUInstance instance, WGPURequestAdapterOptions const* options, WGPURequestAdapterCallbackInfo callbackInfo);
-typedef WGPUFuture (*PFN_wgpuAdapterRequestDevice)(WGPUAdapter adapter, WGPUDeviceDescriptor const* descriptor, WGPURequestDeviceCallbackInfo callbackInfo);
-typedef WGPUQueue (*PFN_wgpuDeviceGetQueue)(WGPUDevice device);
-typedef void (*PFN_wgpuSurfaceGetCapabilities2)(WGPUSurface surface, WGPUAdapter adapter, WGPUSurfaceCapabilities* capabilities);
-typedef void (*PFN_wgpuSurfaceCapabilitiesFreeMembers2)(WGPUSurfaceCapabilities capabilities);
-typedef WGPUShaderModule (*PFN_wgpuDeviceCreateShaderModule)(WGPUDevice device, WGPUShaderModuleDescriptor const* descriptor);
-typedef WGPURenderPipeline (*PFN_wgpuDeviceCreateRenderPipeline)(WGPUDevice device, WGPURenderPipelineDescriptor const* descriptor);
-typedef void (*PFN_wgpuDeviceSetLabel)(WGPUDevice device, WGPUStringView label);
-typedef WGPUBuffer (*PFN_wgpuDeviceCreateBuffer)(WGPUDevice device, WGPUBufferDescriptor const* descriptor);
-typedef void (*PFN_wgpuQueueWriteBuffer)(WGPUQueue queue, WGPUBuffer buffer, uint64_t bufferOffset, void const* data, size_t size);
-typedef WGPUCommandEncoder (*PFN_wgpuDeviceCreateCommandEncoder)(WGPUDevice device, WGPUCommandEncoderDescriptor const* descriptor);
-typedef WGPURenderPassEncoder (*PFN_wgpuCommandEncoderBeginRenderPass)(WGPUCommandEncoder encoder, WGPURenderPassDescriptor const* descriptor);
-typedef void (*PFN_wgpuRenderPassEncoderSetPipeline)(WGPURenderPassEncoder pass, WGPURenderPipeline pipeline);
-typedef void (*PFN_wgpuRenderPassEncoderSetVertexBuffer)(WGPURenderPassEncoder pass, uint32_t slot, WGPUBuffer buffer, uint64_t offset, uint64_t size);
-typedef void (*PFN_wgpuRenderPassEncoderDraw)(WGPURenderPassEncoder pass, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance);
-typedef void (*PFN_wgpuRenderPassEncoderEnd)(WGPURenderPassEncoder pass);
-typedef WGPUCommandBuffer (*PFN_wgpuCommandEncoderFinish)(WGPUCommandEncoder encoder, WGPUCommandBufferDescriptor const* descriptor);
-typedef void (*PFN_wgpuQueueSubmit)(WGPUQueue queue, size_t commandCount, WGPUCommandBuffer const* commands);
-typedef WGPUTextureView (*PFN_wgpuTextureCreateView)(WGPUTexture texture, WGPUTextureViewDescriptor const* descriptor);
-typedef void (*PFN_wgpuTextureViewRelease)(WGPUTextureView view);
-typedef void (*PFN_wgpuTextureRelease)(WGPUTexture texture);
-typedef void (*PFN_wgpuCommandBufferRelease)(WGPUCommandBuffer buffer);
-typedef void (*PFN_wgpuCommandEncoderRelease)(WGPUCommandEncoder encoder);
-
-static PFN_wgpuCreateInstance p_wgpuCreateInstance = nullptr;
-static PFN_wgpuInstanceRequestAdapter p_wgpuInstanceRequestAdapter = nullptr;
-static PFN_wgpuAdapterRequestDevice p_wgpuAdapterRequestDevice = nullptr;
-static PFN_wgpuDeviceGetQueue p_wgpuDeviceGetQueue = nullptr;
-static PFN_wgpuSurfaceGetCapabilities2 p_wgpuSurfaceGetCapabilities = nullptr;
-static PFN_wgpuSurfaceCapabilitiesFreeMembers2 p_wgpuSurfaceCapabilitiesFreeMembers = nullptr;
-static PFN_wgpuDeviceCreateShaderModule p_wgpuDeviceCreateShaderModule = nullptr;
-static PFN_wgpuDeviceCreateRenderPipeline p_wgpuDeviceCreateRenderPipeline = nullptr;
-static PFN_wgpuDeviceSetLabel p_wgpuDeviceSetLabel = nullptr;
-static PFN_wgpuDeviceCreateBuffer p_wgpuDeviceCreateBuffer = nullptr;
-static PFN_wgpuQueueWriteBuffer p_wgpuQueueWriteBuffer = nullptr;
-static PFN_wgpuDeviceCreateCommandEncoder p_wgpuDeviceCreateCommandEncoder = nullptr;
-static PFN_wgpuCommandEncoderBeginRenderPass p_wgpuCommandEncoderBeginRenderPass = nullptr;
-static PFN_wgpuRenderPassEncoderSetPipeline p_wgpuRenderPassEncoderSetPipeline = nullptr;
-static PFN_wgpuRenderPassEncoderSetVertexBuffer p_wgpuRenderPassEncoderSetVertexBuffer = nullptr;
-static PFN_wgpuRenderPassEncoderDraw p_wgpuRenderPassEncoderDraw = nullptr;
-static PFN_wgpuRenderPassEncoderEnd p_wgpuRenderPassEncoderEnd = nullptr;
-static PFN_wgpuCommandEncoderFinish p_wgpuCommandEncoderFinish = nullptr;
-static PFN_wgpuQueueSubmit p_wgpuQueueSubmit = nullptr;
-static PFN_wgpuTextureCreateView p_wgpuTextureCreateView = nullptr;
-static PFN_wgpuTextureViewRelease p_wgpuTextureViewRelease = nullptr;
-static PFN_wgpuTextureRelease p_wgpuTextureRelease = nullptr;
-static PFN_wgpuCommandBufferRelease p_wgpuCommandBufferRelease = nullptr;
-static PFN_wgpuCommandEncoderRelease p_wgpuCommandEncoderRelease = nullptr;
-
-static std::wstring getExecutableDirW() {
-    wchar_t buffer[MAX_PATH];
-    DWORD len = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (len == 0 || len == MAX_PATH) return L".";
-    std::wstring path(buffer, len);
-    size_t pos = path.find_last_of(L"\\/");
-    if (pos == std::wstring::npos) return L".";
-    return path.substr(0, pos);
-}
-
-static HMODULE loadWgpuLibrary() {
-    if (wgpuLibHandle) return wgpuLibHandle;
-    std::wstring execDir = getExecutableDirW();
-    std::vector<std::wstring> candidates = {
-        execDir + L"\\webgpu_dawn.dll",
-        execDir + L"\\libwebgpu_dawn.dll",
-        execDir + L"\\..\\Resources\\webgpu_dawn.dll",
-        execDir + L"\\..\\Resources\\libwebgpu_dawn.dll",
-    };
-    for (const auto& path : candidates) {
-        wgpuLibHandle = LoadLibraryW(path.c_str());
-        if (wgpuLibHandle) break;
-    }
-    if (!wgpuLibHandle) {
-        wgpuLibHandle = LoadLibraryW(L"webgpu_dawn.dll");
-        if (!wgpuLibHandle) wgpuLibHandle = LoadLibraryW(L"libwebgpu_dawn.dll");
-    }
-    if (!wgpuLibHandle) {
-        ::log("WGPU: failed to load webgpu_dawn.dll");
-    }
-    return wgpuLibHandle;
-}
-
-static bool ensureWgpuSymbols() {
-    if (p_wgpuInstanceCreateSurface && p_wgpuSurfaceConfigure && p_wgpuSurfaceGetCurrentTexture && p_wgpuSurfacePresent
-        && p_wgpuQueueOnSubmittedWorkDone && p_wgpuBufferMapAsync && p_wgpuInstanceWaitAny
-        && p_wgpuBufferGetMappedRange && p_wgpuBufferUnmap) {
-        return true;
-    }
-    HMODULE handle = loadWgpuLibrary();
-    if (!handle) return false;
-    p_wgpuInstanceCreateSurface = (PFN_wgpuInstanceCreateSurface)GetProcAddress(handle, "wgpuInstanceCreateSurface");
-    p_wgpuSurfaceConfigure = (PFN_wgpuSurfaceConfigure)GetProcAddress(handle, "wgpuSurfaceConfigure");
-    p_wgpuSurfaceGetCurrentTexture = (PFN_wgpuSurfaceGetCurrentTexture)GetProcAddress(handle, "wgpuSurfaceGetCurrentTexture");
-    p_wgpuSurfacePresent = (PFN_wgpuSurfacePresent)GetProcAddress(handle, "wgpuSurfacePresent");
-    p_wgpuQueueOnSubmittedWorkDone = (PFN_wgpuQueueOnSubmittedWorkDone)GetProcAddress(handle, "wgpuQueueOnSubmittedWorkDone");
-    p_wgpuBufferMapAsync = (PFN_wgpuBufferMapAsync)GetProcAddress(handle, "wgpuBufferMapAsync");
-    p_wgpuInstanceWaitAny = (PFN_wgpuInstanceWaitAny)GetProcAddress(handle, "wgpuInstanceWaitAny");
-    p_wgpuBufferGetMappedRange = (PFN_wgpuBufferGetMappedRange)GetProcAddress(handle, "wgpuBufferGetMappedRange");
-    p_wgpuBufferGetConstMappedRange = (PFN_wgpuBufferGetConstMappedRange)GetProcAddress(handle, "wgpuBufferGetConstMappedRange");
-    p_wgpuBufferUnmap = (PFN_wgpuBufferUnmap)GetProcAddress(handle, "wgpuBufferUnmap");
-    if (!p_wgpuInstanceCreateSurface || !p_wgpuSurfaceConfigure || !p_wgpuSurfaceGetCurrentTexture || !p_wgpuSurfacePresent
-        || !p_wgpuQueueOnSubmittedWorkDone || !p_wgpuBufferMapAsync || !p_wgpuInstanceWaitAny
-        || !p_wgpuBufferGetMappedRange || !p_wgpuBufferUnmap) {
-        ::log("WGPU: missing symbols");
-        return false;
-    }
-    return true;
-}
-
-static bool ensureWgpuTestSymbols() {
-    if (!ensureWgpuSymbols()) return false;
-    HMODULE handle = loadWgpuLibrary();
-    if (!handle) return false;
-#define LOAD_TEST_SYM(name) \
-    p_##name = (decltype(p_##name))GetProcAddress(handle, #name); \
-    if (!p_##name) { \
-        wgpu_log("WGPU test: missing symbol " #name); \
-        return false; \
-    }
-    LOAD_TEST_SYM(wgpuCreateInstance);
-    LOAD_TEST_SYM(wgpuInstanceRequestAdapter);
-    LOAD_TEST_SYM(wgpuAdapterRequestDevice);
-    LOAD_TEST_SYM(wgpuDeviceGetQueue);
-    LOAD_TEST_SYM(wgpuSurfaceGetCapabilities);
-    LOAD_TEST_SYM(wgpuSurfaceCapabilitiesFreeMembers);
-    LOAD_TEST_SYM(wgpuDeviceCreateShaderModule);
-    LOAD_TEST_SYM(wgpuDeviceCreateRenderPipeline);
-    LOAD_TEST_SYM(wgpuDeviceSetLabel);
-    LOAD_TEST_SYM(wgpuDeviceCreateBuffer);
-    LOAD_TEST_SYM(wgpuQueueWriteBuffer);
-    LOAD_TEST_SYM(wgpuDeviceCreateCommandEncoder);
-    LOAD_TEST_SYM(wgpuCommandEncoderBeginRenderPass);
-    LOAD_TEST_SYM(wgpuRenderPassEncoderSetPipeline);
-    LOAD_TEST_SYM(wgpuRenderPassEncoderSetVertexBuffer);
-    LOAD_TEST_SYM(wgpuRenderPassEncoderDraw);
-    LOAD_TEST_SYM(wgpuRenderPassEncoderEnd);
-    LOAD_TEST_SYM(wgpuCommandEncoderFinish);
-    LOAD_TEST_SYM(wgpuQueueSubmit);
-    LOAD_TEST_SYM(wgpuTextureCreateView);
-    LOAD_TEST_SYM(wgpuTextureViewRelease);
-    LOAD_TEST_SYM(wgpuTextureRelease);
-    LOAD_TEST_SYM(wgpuCommandBufferRelease);
-    LOAD_TEST_SYM(wgpuCommandEncoderRelease);
-#undef LOAD_TEST_SYM
-    wgpu_log("WGPU test: all 24 test symbols loaded successfully");
-    return true;
-}
-
-// ---- GPU Test State and Rendering ----
-
-struct GPUTestState {
-    WGPUInstance instance = nullptr;
-    WGPUSurface surface = nullptr;
-    WGPUAdapter adapter = nullptr;
-    WGPUDevice device = nullptr;
-    WGPUQueue queue = nullptr;
-    WGPURenderPipeline pipeline = nullptr;
-    WGPUBuffer vertexBuffer = nullptr;
-    WGPUTextureFormat surfaceFormat = WGPUTextureFormat_BGRA8UnormSrgb;
-    WGPUCompositeAlphaMode alphaMode = WGPUCompositeAlphaMode_Opaque;
-    HWND hwnd = NULL;
-    UINT_PTR timerId = 0;
-    float angle = 0.0f;
-    uint32_t lastWidth = 0;
-    uint32_t lastHeight = 0;
-    bool running = false;
-};
-
-static GPUTestState g_gpuTest;
-
-static const float kCubeVertices[] = {
-    // front
-    -0.5f,-0.5f, 0.5f,  0.5f,-0.5f, 0.5f,  0.5f, 0.5f, 0.5f,
-    -0.5f,-0.5f, 0.5f,  0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f,
-    // back
-    -0.5f,-0.5f,-0.5f, -0.5f, 0.5f,-0.5f,  0.5f, 0.5f,-0.5f,
-    -0.5f,-0.5f,-0.5f,  0.5f, 0.5f,-0.5f,  0.5f,-0.5f,-0.5f,
-    // left
-    -0.5f,-0.5f,-0.5f, -0.5f,-0.5f, 0.5f, -0.5f, 0.5f, 0.5f,
-    -0.5f,-0.5f,-0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,-0.5f,
-    // right
-     0.5f,-0.5f,-0.5f,  0.5f, 0.5f,-0.5f,  0.5f, 0.5f, 0.5f,
-     0.5f,-0.5f,-0.5f,  0.5f, 0.5f, 0.5f,  0.5f,-0.5f, 0.5f,
-    // top
-    -0.5f, 0.5f,-0.5f, -0.5f, 0.5f, 0.5f,  0.5f, 0.5f, 0.5f,
-    -0.5f, 0.5f,-0.5f,  0.5f, 0.5f, 0.5f,  0.5f, 0.5f,-0.5f,
-    // bottom
-    -0.5f,-0.5f,-0.5f,  0.5f,-0.5f,-0.5f,  0.5f,-0.5f, 0.5f,
-    -0.5f,-0.5f,-0.5f,  0.5f,-0.5f, 0.5f, -0.5f,-0.5f, 0.5f,
-};
-
-static void buildRotatedVertices(float angle, float* out, size_t count) {
-    const float sinY = sinf(angle);
-    const float cosY = cosf(angle);
-    const float sinX = sinf(angle * 0.7f);
-    const float cosX = cosf(angle * 0.7f);
-    for (size_t i = 0; i < count; i += 3) {
-        float x = kCubeVertices[i];
-        float y = kCubeVertices[i + 1];
-        float z = kCubeVertices[i + 2];
-        float x1 = x * cosY + z * sinY;
-        float z1 = -x * sinY + z * cosY;
-        float y1 = y * cosX - z1 * sinX;
-        float z2 = y * sinX + z1 * cosX;
-        float depth = z2 + 2.5f;
-        float proj = 1.2f / depth;
-        out[i] = x1 * proj;
-        out[i + 1] = y1 * proj;
-        out[i + 2] = 0.0f;
-    }
-}
-
-static void gpuTestConfigureSurface(GPUTestState* state) {
-    if (!state->surface || !state->device || !state->hwnd) return;
-
-    WGPUSurfaceCapabilities caps = {};
-    p_wgpuSurfaceGetCapabilities(state->surface, state->adapter, &caps);
-    if (caps.formatCount > 0 && caps.formats) {
-        state->surfaceFormat = caps.formats[0];
-        wgpu_log("WGPU test: surface format = %d (from %zu available)", (int)state->surfaceFormat, caps.formatCount);
-    }
-    if (caps.alphaModeCount > 0 && caps.alphaModes) {
-        state->alphaMode = caps.alphaModes[0];
-    }
-    p_wgpuSurfaceCapabilitiesFreeMembers(caps);
-
-    RECT rc;
-    GetClientRect(state->hwnd, &rc);
-    uint32_t w = (uint32_t)(rc.right - rc.left);
-    uint32_t h = (uint32_t)(rc.bottom - rc.top);
-    if (w == 0) w = 1;
-    if (h == 0) h = 1;
-    state->lastWidth = w;
-    state->lastHeight = h;
-
-    WGPUSurfaceConfiguration config = {};
-    config.device = state->device;
-    config.format = state->surfaceFormat;
-    config.usage = WGPUTextureUsage_RenderAttachment;
-    config.width = w;
-    config.height = h;
-    config.presentMode = WGPUPresentMode_Fifo;
-    config.alphaMode = state->alphaMode;
-    p_wgpuSurfaceConfigure(state->surface, &config);
-    wgpu_log("WGPU test: surface configured %ux%u", w, h);
-}
-
-static void gpuTestSetupPipeline(GPUTestState* state) {
-    if (!state->device) return;
-    const char* shaderSrc = R"WGSL(
-struct VSOut {
-  @builtin(position) position : vec4<f32>,
-};
-
-@vertex
-fn vs_main(@location(0) position: vec3<f32>) -> VSOut {
-  var out: VSOut;
-  out.position = vec4<f32>(position, 1.0);
-  return out;
-}
-
-@fragment
-fn fs_main() -> @location(0) vec4<f32> {
-  return vec4<f32>(0.1, 0.9, 0.4, 1.0);
-}
-)WGSL";
-
-    WGPUShaderSourceWGSL wgsl = {};
-    wgsl.chain.sType = WGPUSType_ShaderSourceWGSL;
-    wgsl.code.data = shaderSrc;
-    wgsl.code.length = WGPU_STRLEN;
-
-    WGPUShaderModuleDescriptor shaderDesc = {};
-    shaderDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&wgsl);
-
-    WGPUShaderModule shader = p_wgpuDeviceCreateShaderModule(state->device, &shaderDesc);
-    if (!shader) {
-        wgpu_log("WGPU test: FAILED to create shader module");
-        return;
-    }
-    wgpu_log("WGPU test: shader module created");
-
-    WGPUStringView vsEntry = { "vs_main", WGPU_STRLEN };
-    WGPUStringView fsEntry = { "fs_main", WGPU_STRLEN };
-
-    WGPUVertexAttribute attr = {};
-    attr.format = WGPUVertexFormat_Float32x3;
-    attr.offset = 0;
-    attr.shaderLocation = 0;
-
-    WGPUVertexBufferLayout vbuf = {};
-    vbuf.arrayStride = sizeof(float) * 3;
-    vbuf.attributeCount = 1;
-    vbuf.attributes = &attr;
-    vbuf.stepMode = WGPUVertexStepMode_Vertex;
-
-    WGPUVertexState vstate = {};
-    vstate.module = shader;
-    vstate.entryPoint = vsEntry;
-    vstate.bufferCount = 1;
-    vstate.buffers = &vbuf;
-
-    WGPUColorTargetState colorTarget = {};
-    colorTarget.format = state->surfaceFormat;
-    colorTarget.writeMask = WGPUColorWriteMask_All;
-
-    WGPUFragmentState fstate = {};
-    fstate.module = shader;
-    fstate.entryPoint = fsEntry;
-    fstate.targetCount = 1;
-    fstate.targets = &colorTarget;
-
-    WGPUPrimitiveState prim = {};
-    prim.topology = WGPUPrimitiveTopology_TriangleList;
-    prim.stripIndexFormat = WGPUIndexFormat_Undefined;
-    prim.frontFace = WGPUFrontFace_CCW;
-    prim.cullMode = WGPUCullMode_None;
-    prim.unclippedDepth = false;
-
-    WGPUMultisampleState ms = {};
-    ms.count = 1;
-    ms.mask = 0xFFFFFFFF;
-    ms.alphaToCoverageEnabled = false;
-
-    WGPURenderPipelineDescriptor rpDesc = {};
-    rpDesc.vertex = vstate;
-    rpDesc.primitive = prim;
-    rpDesc.multisample = ms;
-    rpDesc.fragment = &fstate;
-
-    state->pipeline = p_wgpuDeviceCreateRenderPipeline(state->device, &rpDesc);
-    if (!state->pipeline) {
-        wgpu_log("WGPU test: FAILED to create render pipeline");
-        return;
-    }
-    wgpu_log("WGPU test: render pipeline created");
-
-    WGPUBufferDescriptor bufDesc = {};
-    bufDesc.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
-    bufDesc.size = sizeof(kCubeVertices);
-    bufDesc.mappedAtCreation = false;
-    state->vertexBuffer = p_wgpuDeviceCreateBuffer(state->device, &bufDesc);
-    if (!state->vertexBuffer) {
-        wgpu_log("WGPU test: FAILED to create vertex buffer");
-        return;
-    }
-    wgpu_log("WGPU test: vertex buffer created (%zu bytes)", sizeof(kCubeVertices));
-
-    float initialVerts[sizeof(kCubeVertices) / sizeof(float)];
-    buildRotatedVertices(0.0f, initialVerts, sizeof(kCubeVertices) / sizeof(float));
-    p_wgpuQueueWriteBuffer(state->queue, state->vertexBuffer, 0, initialVerts, sizeof(initialVerts));
-    wgpu_log("WGPU test: pipeline setup complete");
-}
-
-static void gpuTestRenderFrame(GPUTestState* state) {
-    if (!state->device || !state->surface || !state->queue) return;
-    if (!state->hwnd || !IsWindow(state->hwnd)) return;
-    if (!state->pipeline) return;
-
-    RECT rc;
-    GetClientRect(state->hwnd, &rc);
-    uint32_t w = (uint32_t)(rc.right - rc.left);
-    uint32_t h = (uint32_t)(rc.bottom - rc.top);
-    if (w <= 1 || h <= 1) return;
-    if (w != state->lastWidth || h != state->lastHeight) {
-        wgpu_log("WGPU test: resize detected %ux%u -> %ux%u", state->lastWidth, state->lastHeight, w, h);
-        gpuTestConfigureSurface(state);
-    }
-
-    state->angle += 0.02f;
-    float verts[sizeof(kCubeVertices) / sizeof(float)];
-    buildRotatedVertices(state->angle, verts, sizeof(kCubeVertices) / sizeof(float));
-    p_wgpuQueueWriteBuffer(state->queue, state->vertexBuffer, 0, verts, sizeof(verts));
-
-    WGPUSurfaceTexture surfaceTexture = {};
-    p_wgpuSurfaceGetCurrentTexture(state->surface, &surfaceTexture);
-    if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
-        surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
-        static int errorCount = 0;
-        if (errorCount++ < 5) {
-            wgpu_log("WGPU test: surface texture status = %d (not optimal/suboptimal)", (int)surfaceTexture.status);
-        }
-        return;
-    }
-    if (!surfaceTexture.texture) return;
-
-    WGPUTextureView view = p_wgpuTextureCreateView(surfaceTexture.texture, nullptr);
-
-    WGPURenderPassColorAttachment colorAtt = {};
-    colorAtt.view = view;
-    colorAtt.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    colorAtt.loadOp = WGPULoadOp_Clear;
-    colorAtt.storeOp = WGPUStoreOp_Store;
-    colorAtt.clearValue = {0.05, 0.05, 0.1, 1.0};
-
-    WGPURenderPassDescriptor passDesc = {};
-    passDesc.colorAttachmentCount = 1;
-    passDesc.colorAttachments = &colorAtt;
-
-    WGPUCommandEncoder encoder = p_wgpuDeviceCreateCommandEncoder(state->device, nullptr);
-    WGPURenderPassEncoder pass = p_wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
-    p_wgpuRenderPassEncoderSetPipeline(pass, state->pipeline);
-    p_wgpuRenderPassEncoderSetVertexBuffer(pass, 0, state->vertexBuffer, 0, sizeof(kCubeVertices));
-    p_wgpuRenderPassEncoderDraw(pass, (uint32_t)(sizeof(kCubeVertices) / (sizeof(float) * 3)), 1, 0, 0);
-    p_wgpuRenderPassEncoderEnd(pass);
-
-    WGPUCommandBuffer cmd = p_wgpuCommandEncoderFinish(encoder, nullptr);
-    p_wgpuQueueSubmit(state->queue, 1, &cmd);
-    p_wgpuSurfacePresent(state->surface);
-
-    p_wgpuTextureViewRelease(view);
-    p_wgpuTextureRelease(surfaceTexture.texture);
-    p_wgpuCommandBufferRelease(cmd);
-    p_wgpuCommandEncoderRelease(encoder);
-
-    static bool loggedFirstFrame = false;
-    if (!loggedFirstFrame) {
-        wgpu_log("WGPU test: first frame rendered successfully!");
-        loggedFirstFrame = true;
-    }
-}
-
-static void logWgpuStringView(const char* prefix, WGPUStringView sv) {
-    if (!sv.data) {
-        wgpu_log("%s (null)", prefix);
-        return;
-    }
-    size_t len = sv.length == WGPU_STRLEN ? strlen(sv.data) : (size_t)sv.length;
-    std::string msg(sv.data, sv.data + len);
-    wgpu_log("%s %s", prefix, msg.c_str());
-}
-
-static void gpuTestUncapturedErrorCallback(WGPUDevice const* device, WGPUErrorType type, WGPUStringView message, void* userdata1, void* userdata2) {
-    (void)device;
-    (void)userdata1;
-    (void)userdata2;
-    char buf[128];
-    snprintf(buf, sizeof(buf), "WGPU uncaptured error type=%d:", (int)type);
-    logWgpuStringView(buf, message);
-}
-
-static void CALLBACK gpuTestTimerProc(HWND hwnd, UINT msg, UINT_PTR id, DWORD time) {
-    (void)hwnd; (void)msg; (void)id; (void)time;
-    gpuTestRenderFrame(&g_gpuTest);
-}
-
-static void gpuTestRequestDeviceCallback(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView message, void* userdata1, void* userdata2);
-
-static void gpuTestRequestAdapterCallback(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message, void* userdata1, void* userdata2) {
-    if (status != WGPURequestAdapterStatus_Success) {
-        logWgpuStringView("WGPU test: adapter error:", message);
-    }
-    (void)userdata2;
-    GPUTestState* state = (GPUTestState*)userdata1;
-    if (!state || status != WGPURequestAdapterStatus_Success || !adapter) {
-        wgpu_log("WGPU test: adapter request FAILED (status=%d)", (int)status);
-        return;
-    }
-    wgpu_log("WGPU test: adapter acquired");
-    state->adapter = adapter;
-
-    WGPURequestDeviceCallbackInfo cbInfo = {};
-    cbInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-    cbInfo.callback = gpuTestRequestDeviceCallback;
-    cbInfo.userdata1 = state;
-    WGPUDeviceDescriptor deviceDesc = {};
-    deviceDesc.uncapturedErrorCallbackInfo.callback = gpuTestUncapturedErrorCallback;
-    deviceDesc.uncapturedErrorCallbackInfo.userdata1 = state;
-    p_wgpuAdapterRequestDevice(adapter, &deviceDesc, cbInfo);
-}
-
-static void gpuTestRequestDeviceCallback(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView message, void* userdata1, void* userdata2) {
-    if (status != WGPURequestDeviceStatus_Success) {
-        logWgpuStringView("WGPU test: device error:", message);
-    }
-    (void)userdata2;
-    GPUTestState* state = (GPUTestState*)userdata1;
-    if (!state || status != WGPURequestDeviceStatus_Success || !device) {
-        wgpu_log("WGPU test: device request FAILED (status=%d)", (int)status);
-        return;
-    }
-    wgpu_log("WGPU test: device acquired");
-    state->device = device;
-
-    if (p_wgpuDeviceSetLabel) {
-        WGPUStringView label = { "Electrobun WGPU Device", WGPU_STRLEN };
-        p_wgpuDeviceSetLabel(device, label);
-    }
-    state->queue = p_wgpuDeviceGetQueue(device);
-    wgpu_log("WGPU test: queue acquired, configuring surface...");
-
-    gpuTestConfigureSurface(state);
-    gpuTestSetupPipeline(state);
-
-    // Start render loop using Windows timer (16ms ~ 60fps)
-    if (state->timerId) {
-        KillTimer(NULL, state->timerId);
-        state->timerId = 0;
-    }
-    state->timerId = SetTimer(NULL, 0, 16, gpuTestTimerProc);
-    if (state->timerId) {
-        state->running = true;
-        wgpu_log("WGPU test: render timer started (id=%llu, 16ms interval)", (unsigned long long)state->timerId);
-    } else {
-        wgpu_log("WGPU test: FAILED to create render timer, error=%lu", GetLastError());
-    }
-}
-
-static void* runOnMainThreadSyncPtr(std::function<void*()> fn) {
-    return MainThreadDispatcher::dispatch_sync([&]() -> void* { return fn(); });
-}
-
-static void runOnMainThreadSyncVoid(std::function<void()> fn) {
-    MainThreadDispatcher::dispatch_sync([&]() { fn(); });
-}
-
-ELECTROBUN_EXPORT void* wgpuInstanceCreateSurfaceMainThread(void* instance, void* descriptor) {
-    if (!ensureWgpuSymbols()) return nullptr;
-    return runOnMainThreadSyncPtr([&]() -> void* {
-        return p_wgpuInstanceCreateSurface(instance, descriptor);
-    });
-}
-
-ELECTROBUN_EXPORT void* wgpuCreateSurfaceForView(void* wgpuInstance, AbstractView* abstractView) {
-    if (!wgpuInstance || !abstractView || !abstractView->hwnd) {
-        printf("[WGPU] createSurfaceForView: null check failed (inst=%p view=%p hwnd=%p)\n",
-               wgpuInstance, abstractView, abstractView ? abstractView->hwnd : nullptr);
-        return nullptr;
-    }
-    if (!ensureWgpuSymbols()) return nullptr;
-
-    HWND hwnd = abstractView->hwnd;
-    printf("[WGPU] createSurfaceForView: creating surface for HWND=%p\n", hwnd);
-    void* result = runOnMainThreadSyncPtr([&]() -> void* {
-        WGPUSurfaceSourceWindowsHWND hwndSource = {};
-        hwndSource.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
-        hwndSource.hinstance = (void*)GetModuleHandle(NULL);
-        hwndSource.hwnd = (void*)hwnd;
-
-        WGPUSurfaceDescriptor surfaceDesc = {};
-        surfaceDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&hwndSource);
-        return p_wgpuInstanceCreateSurface(wgpuInstance, &surfaceDesc);
-    });
-    printf("[WGPU] createSurfaceForView: surface=%p\n", result);
-    return result;
-}
-
-ELECTROBUN_EXPORT void wgpuSurfaceConfigureMainThread(void* surface, void* config) {
-    if (!ensureWgpuSymbols()) return;
-    runOnMainThreadSyncVoid([&]() { p_wgpuSurfaceConfigure(surface, config); });
-}
-
-ELECTROBUN_EXPORT void wgpuSurfaceGetCurrentTextureMainThread(void* surface, void* surfaceTexture) {
-    if (!ensureWgpuSymbols()) return;
-    static int callCount = 0;
-    runOnMainThreadSyncVoid([&]() { p_wgpuSurfaceGetCurrentTexture(surface, surfaceTexture); });
-    if (callCount < 3) {
-        // Log status field (offset 16 in WGPUSurfaceTexture struct: texture(8) + suboptimal(4) + pad(4) + status(4))
-        uint32_t status = *((uint32_t*)((uint8_t*)surfaceTexture + 16));
-        void* texture = *((void**)surfaceTexture);
-        printf("[WGPU] getCurrentTexture[%d]: texture=%p status=%u\n", callCount, texture, status);
-        callCount++;
-    }
-}
-
-ELECTROBUN_EXPORT int32_t wgpuSurfacePresentMainThread(void* surface) {
-    if (!ensureWgpuSymbols()) return 0;
-    static bool logged = false;
-    if (!logged) { printf("[WGPU] surfacePresentMainThread: first present call, surface=%p\n", surface); logged = true; }
-    return (int32_t)(intptr_t)runOnMainThreadSyncPtr([&]() -> void* {
-        return (void*)(intptr_t)p_wgpuSurfacePresent(surface);
-    });
-}
-
-ELECTROBUN_EXPORT uint64_t wgpuQueueOnSubmittedWorkDoneShim(void* queue, void* callbackInfo) {
-    if (!ensureWgpuSymbols()) return 0;
-    if (!callbackInfo) return 0;
-    WGPUQueueWorkDoneCallbackInfo info = *(WGPUQueueWorkDoneCallbackInfo*)callbackInfo;
-    WGPUFuture future = p_wgpuQueueOnSubmittedWorkDone((WGPUQueue)queue, info);
-    return future.id;
-}
-
-ELECTROBUN_EXPORT uint64_t wgpuBufferMapAsyncShim(void* buffer, uint64_t mode, uint64_t offset, uint64_t size, void* callbackInfo) {
-    if (!ensureWgpuSymbols()) return 0;
-    if (!callbackInfo) return 0;
-    WGPUBufferMapCallbackInfo info = *(WGPUBufferMapCallbackInfo*)callbackInfo;
-    WGPUFuture future = p_wgpuBufferMapAsync((WGPUBuffer)buffer, (WGPUMapMode)mode, (size_t)offset, (size_t)size, info);
-    return future.id;
-}
-
-ELECTROBUN_EXPORT int32_t wgpuInstanceWaitAnyShim(void* instance, uint64_t futureId, uint64_t timeoutNS) {
-    if (!ensureWgpuSymbols()) return 0;
-    if (!instance || !futureId) return 0;
-    WGPUFutureWaitInfo info;
-    info.future.id = futureId;
-    info.completed = WGPU_FALSE;
-    WGPUWaitStatus status = p_wgpuInstanceWaitAny((WGPUInstance)instance, 1, &info, timeoutNS);
-    if (status == WGPUWaitStatus_Success && info.completed) return 1;
-    return 0;
-}
-
-ELECTROBUN_EXPORT uint8_t* wgpuBufferReadSyncShim(
-    void* instance,
-    void* buffer,
-    uint64_t offset,
-    uint64_t size,
-    uint64_t timeoutNS,
-    uint64_t* outSize
-) {
-    if (!ensureWgpuSymbols()) return nullptr;
-    if (!instance || !buffer || size == 0) return nullptr;
-
-    WGPUBufferMapCallbackInfo mapInfo = {};
-    mapInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-    mapInfo.callback = nullptr;
-    mapInfo.userdata1 = nullptr;
-    mapInfo.userdata2 = nullptr;
-
-    WGPUFuture mapFuture = p_wgpuBufferMapAsync(
-        (WGPUBuffer)buffer,
-        WGPUMapMode_Read,
-        (size_t)offset,
-        (size_t)size,
-        mapInfo
-    );
-
-    WGPUFutureWaitInfo waitInfo;
-    waitInfo.future = mapFuture;
-    waitInfo.completed = WGPU_FALSE;
-    WGPUWaitStatus status = p_wgpuInstanceWaitAny(
-        (WGPUInstance)instance,
-        1,
-        &waitInfo,
-        timeoutNS
-    );
-
-    if (status != WGPUWaitStatus_Success || !waitInfo.completed) {
-        return nullptr;
-    }
-
-    void* mapped = nullptr;
-    if (p_wgpuBufferGetConstMappedRange) {
-        mapped = p_wgpuBufferGetConstMappedRange((WGPUBuffer)buffer, (size_t)offset, (size_t)size);
-    }
-    if (!mapped) {
-        mapped = p_wgpuBufferGetMappedRange((WGPUBuffer)buffer, (size_t)offset, (size_t)size);
-    }
-    if (!mapped) return nullptr;
-
-    uint8_t* out = (uint8_t*)malloc((size_t)size);
-    if (!out) return nullptr;
-    memcpy(out, mapped, (size_t)size);
-    p_wgpuBufferUnmap((WGPUBuffer)buffer);
-
-    if (outSize) *outSize = size;
-    return out;
-}
-
-ELECTROBUN_EXPORT int32_t wgpuBufferReadSyncIntoShim(
-    void* instance,
-    void* buffer,
-    uint64_t offset,
-    uint64_t size,
-    uint64_t timeoutNS,
-    void* dst
-) {
-    if (!ensureWgpuSymbols()) return 0;
-    if (!instance || !buffer || !dst || size == 0) return 0;
-
-    WGPUBufferMapCallbackInfo mapInfo = {};
-    mapInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-    mapInfo.callback = nullptr;
-    mapInfo.userdata1 = nullptr;
-    mapInfo.userdata2 = nullptr;
-
-    WGPUFuture mapFuture = p_wgpuBufferMapAsync(
-        (WGPUBuffer)buffer,
-        WGPUMapMode_Read,
-        (size_t)offset,
-        (size_t)size,
-        mapInfo
-    );
-
-    WGPUFutureWaitInfo waitInfo;
-    waitInfo.future = mapFuture;
-    waitInfo.completed = WGPU_FALSE;
-    WGPUWaitStatus status = p_wgpuInstanceWaitAny(
-        (WGPUInstance)instance,
-        1,
-        &waitInfo,
-        timeoutNS
-    );
-
-    if (status != WGPUWaitStatus_Success || !waitInfo.completed) {
-        return 0;
-    }
-
-    void* mapped = nullptr;
-    if (p_wgpuBufferGetConstMappedRange) {
-        mapped = p_wgpuBufferGetConstMappedRange((WGPUBuffer)buffer, (size_t)offset, (size_t)size);
-    }
-    if (!mapped) {
-        mapped = p_wgpuBufferGetMappedRange((WGPUBuffer)buffer, (size_t)offset, (size_t)size);
-    }
-    if (!mapped) return 0;
-    memcpy(dst, mapped, (size_t)size);
-    p_wgpuBufferUnmap((WGPUBuffer)buffer);
-    return 1;
-}
-
-struct WGPUReadbackJob {
-    std::atomic<int> done;
-    std::atomic<int> ok;
-    std::atomic<int> status;
-    uint8_t* dst;
-    size_t size;
-    WGPUBuffer buffer;
-    size_t offset;
-};
-
-static void wgpuReadbackCallback(
-    WGPUMapAsyncStatus status,
-    WGPUStringView /*message*/,
-    void* userdata1,
-    void* /*userdata2*/
-) {
-    WGPUReadbackJob* job = (WGPUReadbackJob*)userdata1;
-    if (!job) return;
-    if (status != WGPUMapAsyncStatus_Success) {
-        job->ok.store(0);
-        job->status.store(2);
-        job->done.store(1);
-        return;
-    }
-    void* mapped = nullptr;
-    if (p_wgpuBufferGetConstMappedRange) {
-        mapped = p_wgpuBufferGetConstMappedRange(job->buffer, job->offset, job->size);
-    }
-    if (!mapped) {
-        mapped = p_wgpuBufferGetMappedRange(job->buffer, job->offset, job->size);
-    }
-    if (mapped && job->dst) {
-        memcpy(job->dst, mapped, job->size);
-        job->ok.store(1);
-        job->status.store(1);
-    } else {
-        job->ok.store(0);
-        job->status.store(3);
-    }
-    p_wgpuBufferUnmap(job->buffer);
-    job->done.store(1);
-}
-
-ELECTROBUN_EXPORT void* wgpuBufferReadbackBeginShim(
-    void* buffer,
-    uint64_t offset,
-    uint64_t size,
-    void* dst
-) {
-    if (!ensureWgpuSymbols()) return nullptr;
-    if (!buffer || !dst || size == 0) return nullptr;
-
-    WGPUReadbackJob* job = (WGPUReadbackJob*)malloc(sizeof(WGPUReadbackJob));
-    if (!job) return nullptr;
-    job->done.store(0);
-    job->ok.store(0);
-    job->status.store(0);
-    job->dst = (uint8_t*)dst;
-    job->size = (size_t)size;
-    job->buffer = (WGPUBuffer)buffer;
-    job->offset = (size_t)offset;
-
-    WGPUBufferMapCallbackInfo mapInfo = {};
-    mapInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-    mapInfo.callback = wgpuReadbackCallback;
-    mapInfo.userdata1 = job;
-    mapInfo.userdata2 = nullptr;
-
-    p_wgpuBufferMapAsync(
-        (WGPUBuffer)buffer,
-        WGPUMapMode_Read,
-        (size_t)offset,
-        (size_t)size,
-        mapInfo
-    );
-
-    return job;
-}
-
-ELECTROBUN_EXPORT int32_t wgpuBufferReadbackStatusShim(void* jobPtr) {
-    if (!jobPtr) return 2;
-    WGPUReadbackJob* job = (WGPUReadbackJob*)jobPtr;
-    if (job->done.load() == 0) return 0;
-    return job->status.load();
-}
-
-ELECTROBUN_EXPORT void wgpuBufferReadbackFreeShim(void* jobPtr) {
-    if (!jobPtr) return;
-    WGPUReadbackJob* job = (WGPUReadbackJob*)jobPtr;
-    free(job);
-}
-
-ELECTROBUN_EXPORT void wgpuRunGPUTest(void* abstractView) {
-    wgpu_log("WGPU test: wgpuRunGPUTest called, abstractView=%p", abstractView);
-    if (!abstractView) {
-        wgpu_log("WGPU test: abstractView is null, aborting");
-        return;
-    }
-    if (!ensureWgpuTestSymbols()) {
-        wgpu_log("WGPU test: failed to load test symbols, aborting");
-        return;
-    }
-
-    // Use dispatch_async like macOS - the adapter/device callbacks are async anyway
-    MainThreadDispatcher::dispatch_async([abstractView]() {
-        AbstractView* view = (AbstractView*)abstractView;
-        HWND hwnd = view->hwnd;
-        if (!hwnd || !IsWindow(hwnd)) {
-            wgpu_log("WGPU test: no valid HWND found on view (hwnd=%p)", hwnd);
-            return;
-        }
-        wgpu_log("WGPU test: got HWND=%p from WGPUView", hwnd);
-
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        wgpu_log("WGPU test: HWND client rect = %ldx%ld", rc.right - rc.left, rc.bottom - rc.top);
-
-        g_gpuTest.hwnd = hwnd;
-
-        // Create WGPU instance
-        if (!g_gpuTest.instance) {
-            g_gpuTest.instance = p_wgpuCreateInstance(nullptr);
-        }
-        if (!g_gpuTest.instance) {
-            wgpu_log("WGPU test: FAILED to create WGPU instance");
-            return;
-        }
-        wgpu_log("WGPU test: WGPU instance created = %p", g_gpuTest.instance);
-
-        // Create surface from Windows HWND
-        WGPUSurfaceSourceWindowsHWND hwndSource = {};
-        hwndSource.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
-        hwndSource.hinstance = (void*)GetModuleHandle(NULL);
-        hwndSource.hwnd = (void*)hwnd;
-        wgpu_log("WGPU test: creating surface with hinstance=%p hwnd=%p sType=0x%x",
-              hwndSource.hinstance, hwndSource.hwnd, (unsigned)hwndSource.chain.sType);
-
-        WGPUSurfaceDescriptor surfaceDesc = {};
-        surfaceDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&hwndSource);
-        g_gpuTest.surface = (WGPUSurface)p_wgpuInstanceCreateSurface(g_gpuTest.instance, &surfaceDesc);
-        if (!g_gpuTest.surface) {
-            wgpu_log("WGPU test: FAILED to create surface");
-            return;
-        }
-        wgpu_log("WGPU test: surface created = %p", g_gpuTest.surface);
-
-        // Request adapter
-        WGPURequestAdapterOptions opts = {};
-        opts.compatibleSurface = g_gpuTest.surface;
-        WGPURequestAdapterCallbackInfo cbInfo = {};
-        cbInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-        cbInfo.callback = gpuTestRequestAdapterCallback;
-        cbInfo.userdata1 = &g_gpuTest;
-        wgpu_log("WGPU test: requesting adapter...");
-        p_wgpuInstanceRequestAdapter(g_gpuTest.instance, &opts, cbInfo);
-    });
-}
-
-ELECTROBUN_EXPORT void wgpuCreateAdapterDeviceMainThread(void* instancePtr, void* surfacePtr, void* outAdapterDevice) {
-    printf("[WGPU] createAdapterDeviceMainThread: instance=%p surface=%p\n", instancePtr, surfacePtr);
-    if (!ensureWgpuTestSymbols()) { printf("[WGPU] createAdapterDeviceMainThread: ensureWgpuTestSymbols FAILED\n"); return; }
-    MainThreadDispatcher::dispatch_sync([instancePtr, surfacePtr, outAdapterDevice]() {
-        WGPUInstance instance = (WGPUInstance)instancePtr;
-        WGPUSurface surface = (WGPUSurface)surfacePtr;
-
-        WGPUAdapter adapter = nullptr;
-        WGPUDevice device = nullptr;
-        HANDLE adapterEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-        HANDLE deviceEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-
-        // Request adapter
-        struct AdapterCtx { WGPUAdapter* adapter; HANDLE event; };
-        AdapterCtx adapterCtx = { &adapter, adapterEvent };
-
-        WGPURequestAdapterOptions opts = {};
-        opts.compatibleSurface = surface;
-        WGPURequestAdapterCallbackInfo adapterInfo = {};
-        adapterInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-        adapterInfo.callback = [](WGPURequestAdapterStatus status, WGPUAdapter cbAdapter, WGPUStringView message, void* userdata1, void* userdata2) {
-            (void)message; (void)userdata2;
-            AdapterCtx* ctx = (AdapterCtx*)userdata1;
-            if (status == WGPURequestAdapterStatus_Success) {
-                *(ctx->adapter) = cbAdapter;
-            }
-            SetEvent(ctx->event);
-        };
-        adapterInfo.userdata1 = &adapterCtx;
-        p_wgpuInstanceRequestAdapter(instance, &opts, adapterInfo);
-        WaitForSingleObject(adapterEvent, INFINITE);
-        CloseHandle(adapterEvent);
-
-        if (!adapter) {
-            wgpu_log("WGPU: adapter request failed in wgpuCreateAdapterDeviceMainThread");
-            if (outAdapterDevice) {
-                uint64_t* out = (uint64_t*)outAdapterDevice;
-                out[0] = 0;
-                out[1] = 0;
-            }
-            CloseHandle(deviceEvent);
-            return;
-        }
-
-        // Request device
-        struct DeviceCtx { WGPUDevice* device; HANDLE event; };
-        DeviceCtx deviceCtx = { &device, deviceEvent };
-
-        WGPURequestDeviceCallbackInfo deviceInfo = {};
-        deviceInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-        deviceInfo.callback = [](WGPURequestDeviceStatus status, WGPUDevice cbDevice, WGPUStringView message, void* userdata1, void* userdata2) {
-            (void)message; (void)userdata2;
-            DeviceCtx* ctx = (DeviceCtx*)userdata1;
-            if (status == WGPURequestDeviceStatus_Success) {
-                *(ctx->device) = cbDevice;
-            }
-            SetEvent(ctx->event);
-        };
-        deviceInfo.userdata1 = &deviceCtx;
-        WGPUDeviceDescriptor deviceDesc = {};
-        deviceDesc.uncapturedErrorCallbackInfo.callback = gpuTestUncapturedErrorCallback;
-        deviceDesc.uncapturedErrorCallbackInfo.userdata1 = &deviceCtx;
-        p_wgpuAdapterRequestDevice(adapter, &deviceDesc, deviceInfo);
-        WaitForSingleObject(deviceEvent, INFINITE);
-        CloseHandle(deviceEvent);
-
-        printf("[WGPU] createAdapterDeviceMainThread: adapter=%p device=%p\n", adapter, device);
-        if (outAdapterDevice) {
-            uint64_t* out = (uint64_t*)outAdapterDevice;
-            out[0] = (uint64_t)adapter;
-            out[1] = (uint64_t)device;
-        }
-    });
 }
 
 ELECTROBUN_EXPORT void loadHTMLInWebView(AbstractView *abstractView, const char *htmlString) {
@@ -8468,21 +4300,17 @@ ELECTROBUN_EXPORT void webviewFindInPage(AbstractView *abstractView, const char 
     }
 }
 
-// Remote DevTools helper functions for CEF on Windows
+// Remote DevTools helper functions for Windows
 void openRemoteDevTools(uint32_t webviewId) {
-    // TODO: Implement remote debugger approach for Windows CEF
-    // This should trigger the remote debugger system when it's ported from macOS
-    // For now, this is a placeholder that can be implemented once the 
-    // remote debugger approach is fully ported to Windows
+    // TODO: Implement remote debugger approach for Windows
 }
 
 void closeRemoteDevTools(uint32_t webviewId) {
-    // TODO: Close remote debugger window for Windows CEF
+    // TODO: Close remote debugger window
 }
 
 void toggleRemoteDevTools(uint32_t webviewId) {
-    // TODO: Toggle remote debugger window for Windows CEF  
-    // For now, just try to open
+    // TODO: Toggle remote debugger window
     openRemoteDevTools(webviewId);
 }
 
@@ -8560,12 +4388,17 @@ ELECTROBUN_EXPORT HWND createWindowWithFrameAndStyleFromWorker(
     uint32_t styleMask,
     const char* titleBarStyle,
     bool transparent,
+    double trafficLightOffsetX,
+    double trafficLightOffsetY,
     WindowCloseHandler zigCloseHandler,
     WindowMoveHandler zigMoveHandler,
     WindowResizeHandler zigResizeHandler,
     WindowFocusHandler zigFocusHandler,
     WindowBlurHandler zigBlurHandler,
     WindowKeyHandler zigKeyHandler) {
+
+    (void)trafficLightOffsetX;
+    (void)trafficLightOffsetY;
 
     // Everything GUI-related needs to be dispatched to main thread
     HWND hwnd = MainThreadDispatcher::dispatch_sync([=]() -> HWND {
@@ -8598,15 +4431,18 @@ ELECTROBUN_EXPORT HWND createWindowWithFrameAndStyleFromWorker(
         DWORD windowExStyle = WS_EX_APPWINDOW;
 
         // Handle titleBarStyle options
+        data->chromeStyle = ChromeStyle::Default;
         if (titleBarStyle && strcmp(titleBarStyle, "hidden") == 0) {
             // "hidden" = borderless window (no titlebar, no native controls)
             // This is for completely custom chrome
             windowStyle = WS_POPUP | WS_VISIBLE;
         } else if (titleBarStyle && strcmp(titleBarStyle, "hiddenInset") == 0) {
-            // "hiddenInset" = window with border but custom titlebar area
-            // On Windows, we can't easily do the exact macOS inset style,
-            // so we provide a borderless window with shadow for similar effect
-            windowStyle = WS_POPUP | WS_VISIBLE | WS_THICKFRAME;
+            // "hiddenInset" = frameless window with resize borders and DWM shadow.
+            // We use WS_CAPTION | WS_THICKFRAME so the system treats it as a
+            // standard framed window (giving us shadow and border resizing),
+            // then remove the caption bar area in WM_NCCALCSIZE.
+            windowStyle = WS_VISIBLE | WS_CAPTION | WS_THICKFRAME | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+            data->chromeStyle = ChromeStyle::HiddenInset;
         }
         // else: default titleBarStyle = WS_OVERLAPPEDWINDOW (standard window)
 
@@ -8635,7 +4471,7 @@ ELECTROBUN_EXPORT HWND createWindowWithFrameAndStyleFromWorker(
             if (transparent) {
                 // For transparent windows using OSR, UpdateLayeredWindow will handle
                 // the rendering with per-pixel alpha. We don't use SetLayeredWindowAttributes.
-                // The OSRWindow will call UpdateLayeredWindow with the CEF-rendered content.
+                // OSR rendering uses UpdateLayeredWindow with per-pixel alpha.
             }
 
             // Don't apply application menu to transparent or custom chrome windows
@@ -8656,6 +4492,13 @@ ELECTROBUN_EXPORT HWND createWindowWithFrameAndStyleFromWorker(
             }
 
 
+            // Force the window frame to recalculate so WM_NCCALCSIZE
+            // is sent again with chromeStyle already set.
+            if (data->chromeStyle == ChromeStyle::HiddenInset) {
+                SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+
             // Show the window
             ShowWindow(hwnd, SW_SHOW);
             UpdateWindow(hwnd);
@@ -8670,7 +4513,42 @@ ELECTROBUN_EXPORT HWND createWindowWithFrameAndStyleFromWorker(
     return hwnd;
 }
 
-ELECTROBUN_EXPORT void showWindow(void *window) {
+static void activateVisibleWindow(HWND hwnd) {
+    if (!IsWindowVisible(hwnd)) {
+        return;
+    }
+
+    // Bring window to foreground - this is more complex on Windows
+    // due to foreground window restrictions
+    if (SetForegroundWindow(hwnd)) {
+    } else {
+        DWORD currentThreadId = GetCurrentThreadId();
+        DWORD foregroundThreadId = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
+
+        if (currentThreadId != foregroundThreadId) {
+            if (AttachThreadInput(currentThreadId, foregroundThreadId, TRUE)) {
+                SetForegroundWindow(hwnd);
+                SetFocus(hwnd);
+                AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+            } else {
+                FLASHWINFO fwi = {0};
+                fwi.cbSize = sizeof(FLASHWINFO);
+                fwi.hwnd = hwnd;
+                fwi.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
+                fwi.uCount = 3;
+                fwi.dwTimeout = 0;
+                FlashWindowEx(&fwi);
+            }
+        }
+    }
+
+    SetActiveWindow(hwnd);
+    SetFocus(hwnd);
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+}
+
+ELECTROBUN_EXPORT void showWindow(void *window, bool activate) {
     // On Windows, window ptr is actually HWND
     HWND hwnd = reinterpret_cast<HWND>(window);
 
@@ -8680,50 +4558,45 @@ ELECTROBUN_EXPORT void showWindow(void *window) {
     }
     
     // Dispatch to main thread to ensure thread safety
-    MainThreadDispatcher::dispatch_sync([=]() {      
-        // Show the window if it's hidden
+    MainThreadDispatcher::dispatch_sync([=]() {
         if (!IsWindowVisible(hwnd)) {
-            ShowWindow(hwnd, SW_SHOW);
+            ShowWindow(hwnd, activate ? SW_SHOW : SW_SHOWNOACTIVATE);
+        } else if (!activate) {
+            ShowWindow(hwnd, SW_SHOWNA);
         }
-        
-        // Bring window to foreground - this is more complex on Windows
-        // due to foreground window restrictions
-        
-        // First, try the simple approach
-        if (SetForegroundWindow(hwnd)) {
+
+        if (activate) {
+            activateVisibleWindow(hwnd);
         } else {
-            // If that fails, we need to work around Windows' foreground restrictions
-            DWORD currentThreadId = GetCurrentThreadId();
-            DWORD foregroundThreadId = GetWindowThreadProcessId(GetForegroundWindow(), NULL);
-            
-            if (currentThreadId != foregroundThreadId) {
-                // Attach to the foreground thread's input queue temporarily
-                if (AttachThreadInput(currentThreadId, foregroundThreadId, TRUE)) {
-                    SetForegroundWindow(hwnd);
-                    SetFocus(hwnd);
-                    AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
-                } else {
-                    // Last resort - flash the window to get user attention
-                    FLASHWINFO fwi = {0};
-                    fwi.cbSize = sizeof(FLASHWINFO);
-                    fwi.hwnd = hwnd;
-                    fwi.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
-                    fwi.uCount = 3;
-                    fwi.dwTimeout = 0;
-                    FlashWindowEx(&fwi);
-                    
-                }
-            }
+            SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
         }
-        
-        // Ensure the window is active and focused
-        SetActiveWindow(hwnd);
-        SetFocus(hwnd);
-        
-        // Bring to top of Z-order
-        SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, 
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-        
+    });
+}
+
+ELECTROBUN_EXPORT void activateWindow(void *window) {
+    HWND hwnd = reinterpret_cast<HWND>(window);
+
+    if (!IsWindow(hwnd)) {
+        ::log("ERROR: Invalid window handle in activateWindow");
+        return;
+    }
+
+    MainThreadDispatcher::dispatch_sync([=]() {
+        activateVisibleWindow(hwnd);
+    });
+}
+
+ELECTROBUN_EXPORT void hideWindow(void *window) {
+    HWND hwnd = reinterpret_cast<HWND>(window);
+
+    if (!IsWindow(hwnd)) {
+        ::log("ERROR: Invalid window handle in hideWindow");
+        return;
+    }
+
+    MainThreadDispatcher::dispatch_sync([=]() {
+        ShowWindow(hwnd, SW_HIDE);
     });
 }
 
@@ -8989,6 +4862,13 @@ ELECTROBUN_EXPORT void setWindowPosition(NSWindow *window, double x, double y) {
     if (!IsWindow(hwnd)) return;
 
     SetWindowPos(hwnd, NULL, (int)x, (int)y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+ELECTROBUN_EXPORT void setWindowButtonPosition(NSWindow *window, double x, double y) {
+    (void)window;
+    (void)x;
+    (void)y;
+    // Not applicable on Windows - no-op
 }
 
 ELECTROBUN_EXPORT void setWindowSize(NSWindow *window, double width, double height) {
@@ -10425,7 +6305,7 @@ void handleViewsSchemeRequest(ICoreWebView2WebResourceRequestedEventArgs* args,
     // Extract the path after "views://"
     std::string path;
     if (uriStr.length() > 8) {
-        path = uriStr.substr(8); // Remove "views://" prefix
+        path = normalizeViewsRelativePath(uriStr);
     } else {
         path = "index.html"; // Default
     }
@@ -11607,3 +7487,6 @@ extern "C" ELECTROBUN_EXPORT void setWindowIcon(void* window, const char* iconPa
     // Not yet implemented on Windows
     // TODO: Implement using SetWindowIcon/LoadImage APIs
 }
+
+// DComp exported API removed — zero-copy bridge is now an internal
+// implementation detail.

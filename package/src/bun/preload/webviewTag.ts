@@ -65,9 +65,7 @@ export class ElectrobunWebviewTag extends HTMLElement {
 		const html = this.getAttribute("html");
 		const preload = this.getAttribute("preload");
 		const partition = this.getAttribute("partition");
-		const renderer = (this.getAttribute("renderer") || "native") as
-			| "native"
-			| "cef";
+		const renderer = (this.getAttribute("renderer") || "native") as "native";
 		const masks = this.getAttribute("masks");
 		// Sandbox attribute: when present, the child webview is sandboxed (no RPC, events only)
 		const sandbox = this.hasAttribute("sandbox");
@@ -358,10 +356,10 @@ export class ElectrobunWebviewTag extends HTMLElement {
 		else this.removeAttribute("preload");
 	}
 
-	get renderer(): "native" | "cef" {
-		return (this.getAttribute("renderer") as "native" | "cef") || "native";
+	get renderer(): "native" {
+		return (this.getAttribute("renderer") as "native") || "native";
 	}
-	set renderer(value: "native" | "cef") {
+	set renderer(value: "native") {
 		this.setAttribute("renderer", value);
 	}
 

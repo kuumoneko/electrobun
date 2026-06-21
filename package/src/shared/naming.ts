@@ -26,7 +26,7 @@ export function getAppFileName(
 	appName: string,
 	buildEnvironment: BuildEnvironment,
 ): string {
-	const sanitized = sanitizeAppName(appName);
+	const sanitized = appName.replace(/ /g, "");
 	return buildEnvironment === "stable"
 		? sanitized
 		: `${sanitized}-${buildEnvironment}`;

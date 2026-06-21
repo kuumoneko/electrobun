@@ -3,11 +3,8 @@ import electrobunEventEmitter from "../events/eventEmitter";
 import { BrowserView } from "./BrowserView";
 import { type Pointer } from "bun:ffi";
 import { BuildConfig } from "./BuildConfig";
-import { quit } from "./Utils";
 import { type RPCWithTransport } from "../../shared/rpc.js";
 import { getNextWindowId } from "./windowIds";
-import { GpuWindowMap } from "./GpuWindow";
-import { WGPUView } from "./WGPUView";
 
 const buildConfig = await BuildConfig.get();
 
@@ -23,7 +20,7 @@ export type WindowOptionsType<T = undefined> = {
 	html: string | null;
 	preload: string | null;
 	viewsRoot: string | null;
-	renderer: "native" | "cef";
+	renderer: "native";
 	rpc?: T;
 	styleMask?: {};
 	// titleBarStyle options:
@@ -35,7 +32,6 @@ export type WindowOptionsType<T = undefined> = {
 	transparent: boolean;
 	// passthrough: when true, mouse events pass through transparent regions
 	passthrough: boolean;
-	hidden?: boolean;
 	navigationRules: string | null;
 	// Sandbox mode: when true, disables RPC and only allows event emission
 	// Use for untrusted content (remote URLs) to prevent malicious sites from
@@ -59,7 +55,6 @@ const defaultOptions: WindowOptionsType = {
 	titleBarStyle: "default",
 	transparent: false,
 	passthrough: false,
-	hidden: false,
 	navigationRules: null,
 	sandbox: false,
 };
@@ -79,35 +74,6 @@ electrobunEventEmitter.on("close", (event: { data: { id: number } }) => {
 			view.remove();
 		}
 	}
-
-	// Clean up all WGPU views associated with this window
-	const wgpuViews = WGPUView.getAll().filter(v => v.windowId === windowId);
-	for (const view of wgpuViews) {
-		try {
-			// If ptr is null, the view was already cleaned up by the renderer or native cleanup
-			if (view.ptr === null) {
-				// Already cleaned up, skip
-			} else {
-				// Programmatic close path - remove the view
-				view.remove();
-			}
-		} catch (e) {
-			console.error(`Error cleaning up WGPU view ${view.id}:`, e);
-			// If remove() failed, at least mark it as cleaned up
-			view.ptr = null as any;
-		}
-	}
-
-	const exitOnLastWindowClosed =
-		buildConfig.runtime?.exitOnLastWindowClosed ?? true;
-
-	if (
-		exitOnLastWindowClosed &&
-		Object.keys(BrowserWindowMap).length === 0 &&
-		Object.keys(GpuWindowMap).length === 0
-	) {
-		quit();
-	}
 });
 
 export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
@@ -119,7 +85,7 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 	html: string | null = null;
 	preload: string | null = null;
 	viewsRoot: string | null = null;
-	renderer: "native" | "cef" = "native";
+	renderer: "native" = "native";
 	transparent: boolean = false;
 	passthrough: boolean = false;
 	hidden: boolean = false;
@@ -132,11 +98,11 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 		width: number;
 		height: number;
 	} = {
-		x: 0,
-		y: 0,
-		width: 800,
-		height: 600,
-	};
+			x: 0,
+			y: 0,
+			width: 800,
+			height: 600,
+		};
 	// todo (yoav): make this an array of ids or something
 	webviewId!: number;
 
@@ -152,7 +118,6 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 		this.renderer = options.renderer || defaultOptions.renderer;
 		this.transparent = options.transparent ?? false;
 		this.passthrough = options.passthrough ?? false;
-		this.hidden = options.hidden ?? false;
 		this.navigationRules = options.navigationRules || null;
 		this.sandbox = options.sandbox ?? false;
 
@@ -164,7 +129,6 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 		styleMask,
 		titleBarStyle,
 		transparent,
-		hidden,
 	}: Partial<WindowOptionsType<T>>) {
 		this.ptr = ffi.request.createWindow({
 			id: this.id,
@@ -193,21 +157,20 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 				// hiddenInset: transparent titlebar with inset native controls
 				...(titleBarStyle === "hiddenInset"
 					? {
-							Titled: true,
-							FullSizeContentView: true,
-						}
+						Titled: true,
+						FullSizeContentView: true,
+					}
 					: {}),
 				// hidden: no titlebar, no native controls (for fully custom chrome)
 				...(titleBarStyle === "hidden"
 					? {
-							Titled: false,
-							FullSizeContentView: true,
-						}
+						Titled: false,
+						FullSizeContentView: true,
+					}
 					: {}),
 			},
 			titleBarStyle: titleBarStyle || "default",
 			transparent: transparent ?? false,
-			hidden: hidden ?? false,
 		}) as Pointer;
 
 		BrowserWindowMap[this.id] = this;
@@ -245,18 +208,11 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 	}
 
 	get webview() {
-		// todo (yoav): we don't want this to be undefined, so maybe we should just
-		// link directly to the browserview object instead of a getter
 		return BrowserView.getById(this.webviewId) as BrowserView<T>;
 	}
 
 	static getById(id: number) {
 		return BrowserWindowMap[id];
-	}
-
-	setTitle(title: string) {
-		this.title = title;
-		return ffi.request.setTitle({ winId: this.id, title });
 	}
 
 	close() {
@@ -275,98 +231,8 @@ export class BrowserWindow<T extends RPCWithTransport = RPCWithTransport> {
 		return ffi.request.minimizeWindow({ winId: this.id });
 	}
 
-	unminimize() {
-		return ffi.request.restoreWindow({ winId: this.id });
-	}
-
-	isMinimized(): boolean {
-		return ffi.request.isWindowMinimized({ winId: this.id });
-	}
-
 	maximize() {
 		return ffi.request.maximizeWindow({ winId: this.id });
-	}
-
-	unmaximize() {
-		return ffi.request.unmaximizeWindow({ winId: this.id });
-	}
-
-	isMaximized(): boolean {
-		return ffi.request.isWindowMaximized({ winId: this.id });
-	}
-
-	setFullScreen(fullScreen: boolean) {
-		return ffi.request.setWindowFullScreen({ winId: this.id, fullScreen });
-	}
-
-	isFullScreen(): boolean {
-		return ffi.request.isWindowFullScreen({ winId: this.id });
-	}
-
-	setAlwaysOnTop(alwaysOnTop: boolean) {
-		return ffi.request.setWindowAlwaysOnTop({ winId: this.id, alwaysOnTop });
-	}
-
-	isAlwaysOnTop(): boolean {
-		return ffi.request.isWindowAlwaysOnTop({ winId: this.id });
-	}
-	
-	setVisibleOnAllWorkspaces(visibleOnAllWorkspaces: boolean) {
-		return ffi.request.setWindowVisibleOnAllWorkspaces({ winId: this.id, visibleOnAllWorkspaces });
-	}
-	
-	isVisibleOnAllWorkspaces(): boolean {
-		return ffi.request.isWindowVisibleOnAllWorkspaces({ winId: this.id });
-	}
-
-	setPosition(x: number, y: number) {
-		this.frame.x = x;
-		this.frame.y = y;
-		return ffi.request.setWindowPosition({ winId: this.id, x, y });
-	}
-
-	setSize(width: number, height: number) {
-		this.frame.width = width;
-		this.frame.height = height;
-		return ffi.request.setWindowSize({ winId: this.id, width, height });
-	}
-
-	setFrame(x: number, y: number, width: number, height: number) {
-		this.frame = { x, y, width, height };
-		return ffi.request.setWindowFrame({ winId: this.id, x, y, width, height });
-	}
-
-	getFrame(): { x: number; y: number; width: number; height: number } {
-		const frame = ffi.request.getWindowFrame({ winId: this.id });
-		// Update internal state
-		this.frame = frame;
-		return frame;
-	}
-
-	getPosition(): { x: number; y: number } {
-		const frame = this.getFrame();
-		return { x: frame.x, y: frame.y };
-	}
-
-	getSize(): { width: number; height: number } {
-		const frame = this.getFrame();
-		return { width: frame.width, height: frame.height };
-	}
-
-	/**
-	 * Set the page zoom level for the window's webview (WebKit only).
-	 * @param zoomLevel - The zoom level (1.0 = 100%, 1.5 = 150%, etc.)
-	 */
-	setPageZoom(zoomLevel: number) {
-		this.webview?.setPageZoom(zoomLevel);
-	}
-
-	/**
-	 * Get the current page zoom level for the window's webview.
-	 * @returns The current zoom level (1.0 = 100%)
-	 */
-	getPageZoom(): number {
-		return this.webview?.getPageZoom() ?? 1.0;
 	}
 
 	// todo (yoav): move this to a class that also has off, append, prepend, etc.

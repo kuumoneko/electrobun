@@ -1,7 +1,6 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    // zig build -Doptimize=Debug to enable debug mode
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -12,11 +11,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Link with libc for chmod and other system calls
     exe.linkLibC();
-
-    // Use Console subsystem on all platforms so users can see extraction progress
-    // The console window will automatically close when extraction completes
-
+    exe.addWin32ResourceFile(.{
+        .file = b.path("app.rc"),
+    });
     b.installArtifact(exe);
 }

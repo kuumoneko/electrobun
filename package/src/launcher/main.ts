@@ -10,7 +10,7 @@ const absoluteLibPath = resolve(libPath);
 
 // Wrap main logic in a function to avoid top-level return
 function main() {
-	// Read version.json early to get identifier, name, and channel for CEF initialization
+	// Read version.json early to get identifier, name, and channel
 	let channel = "";
 	let identifier = "";
 	let name = "";
@@ -42,37 +42,6 @@ function main() {
 	} catch (error) {
 		console.error(`[LAUNCHER] Warning: Could not read version.json:`, error);
 		// Continue anyway - this is not critical for dev builds
-	}
-
-	// Check for CEF libraries and warn if LD_PRELOAD not set (Linux only)
-	if (process.platform === "linux") {
-		const cefLibs = [
-			join(pathToMacOS, "libcef.so"),
-			join(pathToMacOS, "libvk_swiftshader.so"),
-		];
-		const existingCefLibs = cefLibs.filter((lib) => existsSync(lib));
-
-		if (existingCefLibs.length > 0 && !process.env["LD_PRELOAD"]) {
-			console.error(
-				`[LAUNCHER] ERROR: CEF libraries found but LD_PRELOAD not set!`,
-			);
-			console.error(
-				`[LAUNCHER] Please run through the wrapper script: ./run.sh`,
-			);
-			console.error(
-				`[LAUNCHER] Or set: LD_PRELOAD="${existingCefLibs.join(":")}" before starting.`,
-			);
-
-			// Try to re-exec ourselves with LD_PRELOAD set
-			const { spawn } = require("child_process");
-			const env = { ...process.env, LD_PRELOAD: existingCefLibs.join(":") };
-			const child = spawn(process.argv[0], process.argv.slice(1), {
-				env,
-				stdio: "inherit",
-			});
-			child.on("exit", (code: number | null) => process.exit(code ?? 1));
-			return; // Don't continue in this process
-		}
 	}
 
 	let lib;
@@ -200,7 +169,7 @@ function main() {
 		const systemTmpDir = tmpdir();
 		const randomFileName = `electrobun-${Date.now()}-${Math.random().toString(36).substring(7)}.js`;
 		appEntrypointPath = join(systemTmpDir, randomFileName);
-
+		console.log(appEntrypointPath)
 		// Prepend code to delete the temp file after a short delay
 		// This runs in the Worker thread, not the main thread (which gets blocked by startEventLoop)
 		const wrappedFileData = `
@@ -228,20 +197,20 @@ ${fileData.toString("utf8")}
 		asarLib.symbols.asar_close(asarArchive);
 	} else {
 		// Fallback to flat file system (for non-ASAR builds)
-		console.log(`[LAUNCHER] Loading app code from flat files`);
+    console.log(`[LAUNCHER] Loading app code from flat files`);
 		appEntrypointPath = join(appFolderPath, "bun", "index.js");
 	}
 
 	// Register signal handlers on the main thread to prevent default termination.
 	// The worker thread's SIGINT handler will call quit() for graceful shutdown.
 	// Without these, SIGINT kills the process before the worker can run beforeQuit.
-	process.on("SIGINT", () => {});
-	process.on("SIGTERM", () => {});
+	process.on("SIGINT", () => { });
+	process.on("SIGTERM", () => { });
 
 	new Worker(appEntrypointPath, {
 		// consider adding a preload with error handling
 		// preload: [''];
-	});
+  });
 
 	// Pass identifier, name, and channel as C strings using Buffer encoding
 	// Bun FFI requires explicit encoding for cstring parameters

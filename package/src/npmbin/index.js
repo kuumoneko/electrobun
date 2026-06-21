@@ -18,17 +18,17 @@ const nodeModules = process.argv[1].split("node_modules")[0] + "node_modules";
 const electrobunDir = join(nodeModules, "electrobun");
 
 const DEV_CLI_PATH = join(
-	electrobunDir,
-	"dist",
-	platform() === "win32" ? "electrobun.exe" : "electrobun",
+    electrobunDir,
+    "dist",
+    platform() === "win32" ? "electrobun.exe" : "electrobun",
 );
 
 async function main() {
-	// For electrobun development, use local binary
-	if (existsSync(DEV_CLI_PATH)) {
-		spawnSync(DEV_CLI_PATH, process.argv.slice(2), { stdio: "inherit" });
-		return;
-	}
+    // For electrobun development, use local binary
+    if (existsSync(DEV_CLI_PATH)) {
+        spawnSync(DEV_CLI_PATH, process.argv.slice(2), { stdio: "inherit" });
+        return;
+    }
 }
 
 main().catch(console.error);

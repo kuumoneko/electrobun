@@ -9,7 +9,11 @@ import {
 } from "../../shared/rpc.js";
 import { Updater } from "./Updater";
 import { BuildConfig } from "./BuildConfig";
-import { rpcPort, sendMessageToWebviewViaSocket } from "./Socket";
+import {
+	rpcPort,
+	sendMessageToWebviewViaSocket,
+	removeSocketForWebview,
+} from "./Socket";
 import { randomBytes } from "crypto";
 import { type Pointer } from "bun:ffi";
 
@@ -23,7 +27,7 @@ export type BrowserViewOptions<T = undefined> = {
 	html: string | null;
 	preload: string | null;
 	viewsRoot: string | null;
-	renderer: "native" | "cef";
+	renderer: "native";
 	partition: string | null;
 	frame: {
 		x: number;
@@ -73,7 +77,7 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 	ptr!: Pointer;
 	hostWebviewId?: number;
 	windowId!: number;
-	renderer!: "cef" | "native";
+	renderer!: "native";
 	url: string | null = null;
 	html: string | null = null;
 	preload: string | null = null;
@@ -86,11 +90,11 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 		width: number;
 		height: number;
 	} = {
-		x: 0,
-		y: 0,
-		width: 800,
-		height: 600,
-	};
+			x: 0,
+			y: 0,
+			width: 800,
+			height: 600,
+		};
 	pipePrefix!: string;
 	inStream!: fs.WriteStream;
 	outStream!: ReadableStream<Uint8Array>;
@@ -102,6 +106,7 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 	sandbox: boolean = false;
 	startTransparent: boolean = false;
 	startPassthrough: boolean = false;
+	isRemoved: boolean = false;
 
 	constructor(options: Partial<BrowserViewOptions<T>> = defaultOptions) {
 		// const rpc = options.rpc;
@@ -135,11 +140,11 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 		this.ptr = this.init() as Pointer;
 
 		// If HTML content was provided, load it after webview creation.
-		if (this.html) {
-			setTimeout(() => {
-				this.loadHTML(this.html!);
-			}, 100);
-		}
+		// if (this.html) {
+		// 	setTimeout(() => {
+		// 		this.loadHTML(this.html!);
+		// 	}, 100);
+		// }
 	}
 
 	init() {
@@ -211,82 +216,20 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 	// so we have to chunk it
 	// TODO: is this still needed after switching from named pipes
 	executeJavascript(js: string) {
+		if (!this.ptr || this.isRemoved) {
+			return;
+		}
 		ffi.request.evaluateJavascriptWithNoCompletion({ id: this.id, js });
 	}
 
 	loadURL(url: string) {
 		console.log(`DEBUG: loadURL called for webview ${this.id}: ${url}`);
 		this.url = url;
-		native.symbols.loadURLInWebView(this.ptr, toCString(this.url));
-	}
-
-	loadHTML(html: string) {
-		this.html = html;
-		console.log(
-			`DEBUG: Setting HTML content for webview ${this.id}:`,
-			html.substring(0, 50) + "...",
-		);
-
-		if (this.renderer === "cef") {
-			// For CEF, store HTML content in native map and use scheme handler
-			native.symbols.setWebviewHTMLContent(this.id, toCString(html));
-			this.loadURL("views://internal/index.html");
-		} else {
-			// For WKWebView, load HTML content directly
-			native.symbols.loadHTMLInWebView(this.ptr, toCString(html));
-		}
-	}
-
-	setNavigationRules(rules: string[]) {
-		this.navigationRules = JSON.stringify(rules);
-		const rulesJson = JSON.stringify(rules);
-		native.symbols.setWebviewNavigationRules(this.ptr, toCString(rulesJson));
-	}
-
-	findInPage(
-		searchText: string,
-		options?: { forward?: boolean; matchCase?: boolean },
-	) {
-		const forward = options?.forward ?? true;
-		const matchCase = options?.matchCase ?? false;
-		native.symbols.webviewFindInPage(
-			this.ptr,
-			toCString(searchText),
-			forward,
-			matchCase,
-		);
-	}
-
-	stopFindInPage() {
-		native.symbols.webviewStopFind(this.ptr);
+		native!.symbols.loadURLInWebView(this.ptr, toCString(this.url));
 	}
 
 	openDevTools() {
-		native.symbols.webviewOpenDevTools(this.ptr);
-	}
-
-	closeDevTools() {
-		native.symbols.webviewCloseDevTools(this.ptr);
-	}
-
-	toggleDevTools() {
-		native.symbols.webviewToggleDevTools(this.ptr);
-	}
-
-	/**
-	 * Set the page zoom level (WebKit only, similar to browser zoom).
-	 * @param zoomLevel - The zoom level (1.0 = 100%, 1.5 = 150%, etc.)
-	 */
-	setPageZoom(zoomLevel: number) {
-		native.symbols.webviewSetPageZoom(this.ptr, zoomLevel);
-	}
-
-	/**
-	 * Get the current page zoom level.
-	 * @returns The current zoom level (1.0 = 100%)
-	 */
-	getPageZoom(): number {
-		return native.symbols.webviewGetPageZoom(this.ptr) as number;
+		native!.symbols.webviewOpenDevTools(this.ptr);
 	}
 
 	// todo (yoav): move this to a class that also has off, append, prepend, etc.
@@ -295,15 +238,7 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 	// 5 characters per usage and allow minification to be more effective.
 	on(
 		name:
-			| "will-navigate"
-			| "did-navigate"
-			| "did-navigate-in-page"
-			| "did-commit-navigation"
-			| "dom-ready"
-			| "download-started"
-			| "download-progress"
-			| "download-completed"
-			| "download-failed",
+			"domReady",
 		handler: (event: unknown) => void,
 	) {
 		const specificName = `${name}-${this.id}`;
@@ -315,6 +250,9 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 
 		return {
 			send(message: any) {
+				if (!that.ptr || that.isRemoved) {
+					return;
+				}
 				const sentOverSocket = sendMessageToWebviewViaSocket(that.id, message);
 
 				if (!sentOverSocket) {
@@ -327,14 +265,31 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
 				}
 			},
 			registerHandler(handler: (msg: unknown) => void) {
+				if (that.isRemoved) {
+					return;
+				}
 				that.rpcHandler = handler;
 			},
 		};
 	};
 
 	remove() {
-		native.symbols.webviewRemove(this.ptr);
+		if (!this.ptr || this.isRemoved) {
+			return;
+		}
+		const ptr = this.ptr;
+		this.isRemoved = true;
+		// Drop JS-side references first so late callbacks cannot target a stale view.
 		delete BrowserViewMap[this.id];
+		removeSocketForWebview(this.id);
+		this.rpc?.setTransport({
+			send() { },
+			registerHandler() { },
+			unregisterHandler() { },
+		});
+		this.rpcHandler = undefined;
+		this.ptr = null as any;
+		native!.symbols.webviewRemove(ptr);
 	}
 
 	static getById(id: number) {

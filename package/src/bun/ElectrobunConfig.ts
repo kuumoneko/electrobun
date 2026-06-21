@@ -145,26 +145,7 @@ export interface ElectrobunConfig {
 		 */
 		asarUnpack?: string[];
 
-		/**
-		 * Override the CEF (Chromium Embedded Framework) version.
-		 * Format: "CEF_VERSION+chromium-CHROMIUM_VERSION"
-		 * Example: "144.0.11+ge135be2+chromium-144.0.7559.97"
-		 *
-		 * Check the electrobun-cef-compat compatibility matrix for tested combinations
-		 * before overriding. Using an untested version may cause runtime issues.
-		 * @default Uses the version bundled with this Electrobun release
-		 */
-		cefVersion?: string;
 
-		/**
-		 * Override the Dawn (WebGPU) version.
-		 * Format: semver string (e.g., "0.2.3") or tag (e.g., "v0.2.3-beta.0")
-		 *
-		 * This downloads the specified electrobun-dawn release and uses it
-		 * instead of the latest release.
-		 * @default Uses the latest electrobun-dawn release
-		 */
-		wgpuVersion?: string;
 
 		/**
 		 * Override the Bun runtime version.
@@ -199,6 +180,22 @@ export interface ElectrobunConfig {
 		watchIgnore?: string[];
 
 		/**
+		 * Carrot build configuration.
+		 * When present, the build also produces a carrot artifact alongside the standalone app.
+		 * Set `carrotOnly: true` to skip the standalone app build entirely.
+		 */
+		carrot?: {
+			id: string;
+			name: string;
+			description?: string;
+			mode?: "window" | "background";
+			carrotOnly?: boolean;
+			permissions?: Record<string, unknown>;
+			dependencies?: Record<string, string>;
+			remoteUIs?: Record<string, { entrypoint: string; [key: string]: unknown }>;
+		};
+
+		/**
 		 * macOS-specific build configuration
 		 */
 		mac?: {
@@ -222,39 +219,10 @@ export interface ElectrobunConfig {
 			notarize?: boolean;
 
 			/**
-			 * Bundle CEF (Chromium Embedded Framework) instead of using system WebView
-			 * @default false
-			 */
-			bundleCEF?: boolean;
-
-			/**
-			 * Bundle Dawn (WebGPU) for GPU-native rendering
-			 * @default false
-			 */
-			bundleWGPU?: boolean;
-
-			/**
 			 * Default renderer for webviews when not explicitly specified
 			 * @default 'native'
 			 */
-			defaultRenderer?: "native" | "cef";
-
-			/**
-			 * Custom Chromium command-line flags to pass to CEF during initialization.
-			 * Keys are flag names without the "--" prefix.
-			 * - `true` — add a switch-only flag
-			 * - `"value"` — add a flag with a value
-			 * - `false` — remove a default flag set by Electrobun
-			 *
-			 * @example
-			 * ```typescript
-			 * chromiumFlags: {
-			 *   "disable-gpu": false,               // remove Electrobun's default --disable-gpu
-			 *   "remote-debugging-port": "9333",    // --remote-debugging-port=9333
-			 * }
-			 * ```
-			 */
-			chromiumFlags?: Record<string, string | boolean>;
+			defaultRenderer?: "native";
 
 			/**
 			 * macOS entitlements for code signing
@@ -273,39 +241,10 @@ export interface ElectrobunConfig {
 		 */
 		win?: {
 			/**
-			 * Bundle CEF (Chromium Embedded Framework) instead of using WebView2
-			 * @default false
-			 */
-			bundleCEF?: boolean;
-
-			/**
-			 * Bundle Dawn (WebGPU) for GPU-native rendering
-			 * @default false
-			 */
-			bundleWGPU?: boolean;
-
-			/**
 			 * Default renderer for webviews when not explicitly specified
 			 * @default 'native'
 			 */
-			defaultRenderer?: "native" | "cef";
-
-			/**
-			 * Custom Chromium command-line flags to pass to CEF during initialization.
-			 * Keys are flag names without the "--" prefix.
-			 * - `true` — add a switch-only flag
-			 * - `"value"` — add a flag with a value
-			 * - `false` — remove a default flag set by Electrobun
-			 *
-			 * @example
-			 * ```typescript
-			 * chromiumFlags: {
-			 *   "disable-gpu": false,               // remove Electrobun's default --disable-gpu
-			 *   "remote-debugging-port": "9333",    // --remote-debugging-port=9333
-			 * }
-			 * ```
-			 */
-			chromiumFlags?: Record<string, string | boolean>;
+			defaultRenderer?: "native";
 
 			/**
 			 * Path to application icon (.ico format)
@@ -321,40 +260,10 @@ export interface ElectrobunConfig {
 		 */
 		linux?: {
 			/**
-			 * Bundle CEF (Chromium Embedded Framework) instead of using GTKWebKit
-			 * Recommended on Linux for advanced layer compositing features
-			 * @default false
-			 */
-			bundleCEF?: boolean;
-
-			/**
-			 * Bundle Dawn (WebGPU) for GPU-native rendering
-			 * @default false
-			 */
-			bundleWGPU?: boolean;
-
-			/**
 			 * Default renderer for webviews when not explicitly specified
 			 * @default 'native'
 			 */
-			defaultRenderer?: "native" | "cef";
-
-			/**
-			 * Custom Chromium command-line flags to pass to CEF during initialization.
-			 * Keys are flag names without the "--" prefix.
-			 * - `true` — add a switch-only flag
-			 * - `"value"` — add a flag with a value
-			 * - `false` — remove a default flag set by Electrobun
-			 *
-			 * @example
-			 * ```typescript
-			 * chromiumFlags: {
-			 *   "disable-gpu": false,               // remove Electrobun's default --disable-gpu
-			 *   "remote-debugging-port": "9333",    // --remote-debugging-port=9333
-			 * }
-			 * ```
-			 */
-			chromiumFlags?: Record<string, string | boolean>;
+			defaultRenderer?: "native";
 
 			/**
 			 * Path to application icon (PNG format recommended)

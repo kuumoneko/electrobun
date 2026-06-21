@@ -376,15 +376,15 @@ const ProgressIndicator = struct {
 };
 
 fn extractFromSelf(allocator: std.mem.Allocator) !bool {
-    std.debug.print("Starting standalone Kuumo Setup...\n", .{});
+    std.debug.print("Starting standalone Electrobun Setup...\n", .{});
 
     // 1. Dynamic Retrieval of payload
     const archive_data = try getAppendedPayload(allocator);
     defer allocator.free(archive_data);
 
     const safe_metadata = AppMetadata{
-        .identifier = "com.kuumo.app",
-        .name = "Kuumo App",
+        .identifier = "com.electrobun.app",
+        .name = "Electrobun App",
         .channel = "stable",
         .hash = "embedded-release",
     };
@@ -397,7 +397,7 @@ fn extractFromSelf(allocator: std.mem.Allocator) !bool {
     const config = try gatherUserPreferences(allocator, default_app_base_dir, safe_metadata);
     const self_extraction_dir = try std.fs.path.join(allocator, &.{ config.install_path, "self-extraction" });
     defer allocator.free(self_extraction_dir);
-    const app_dir = try std.fs.path.join(allocator, &.{ config.install_path, "Kuumo app" });
+    const app_dir = try std.fs.path.join(allocator, &.{ config.install_path, "Electrobun" });
     defer allocator.free(app_dir);
 
     return try extractAndInstall(allocator, archive_data, safe_metadata, self_extraction_dir, app_dir, config);

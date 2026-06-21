@@ -785,7 +785,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 				"--set-version-string", "InternalFilename", config.app.name,
 				"--set-file-version", config.app.version,
 				"--set-product-version", config.app.version,
-				"--set-version-string", "LegalCopyright", "©2026 Kuumo Project. All rights reserved."
+				"--set-version-string", "LegalCopyright", "©2026 Electrobun. All rights reserved."
 			]).exited;
 
 
@@ -813,14 +813,14 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 				} else {
 					const tarballFileName = getTarballFileName(appFileName, OS);
 
-					const urlToPrevVersion = await fetch("https://github.com/kuumoneko/music_player/releases/latest", {
-						"headers": {
-							'User-Agent': 'node-fetch-example',
-							'Accept': 'application/json'
-						},
-						"body": null,
-						"method": "GET"
-					});
+				const urlToPrevVersion = await fetch(`${config.release.baseUrl.replace(/\/+$/, "")}/latest`, {
+					"headers": {
+						'User-Agent': 'node-fetch-example',
+						'Accept': 'application/json'
+					},
+					"body": null,
+					"method": "GET"
+				});
 
 					const json = await urlToPrevVersion.json();
 					const latestVersion = json.tag_name;

@@ -181,10 +181,6 @@ pub fn main() !void {
 
     // Handle platform-specific environment setup
     if (builtin.os.tag == .linux) {
-        // Check for CEF libraries that need LD_PRELOAD
-        const cef_lib_path = try std.fs.path.join(arena_alloc, &.{ exe_dir, "libcef.so" });
-        const swiftshader_lib_path = try std.fs.path.join(arena_alloc, &.{ exe_dir, "libvk_swiftshader.so" });
-
         var env_map = try std.process.getEnvMap(arena_alloc);
 
         // Set LD_LIBRARY_PATH to include current directory
@@ -193,30 +189,6 @@ pub fn main() !void {
             try env_map.put("LD_LIBRARY_PATH", new_ld_path);
         } else {
             try env_map.put("LD_LIBRARY_PATH", exe_dir);
-        }
-
-        // Check if CEF libraries exist and set LD_PRELOAD if needed
-        const cef_exists = blk: {
-            std.fs.accessAbsolute(cef_lib_path, .{}) catch {
-                break :blk false;
-            };
-            break :blk true;
-        };
-        const swiftshader_exists = blk: {
-            std.fs.accessAbsolute(swiftshader_lib_path, .{}) catch {
-                break :blk false;
-            };
-            break :blk true;
-        };
-
-        if (cef_exists or swiftshader_exists) {
-            var preload_libs = std.ArrayList([]const u8).init(arena_alloc);
-            if (cef_exists) try preload_libs.append("./libcef.so");
-            if (swiftshader_exists) try preload_libs.append("./libvk_swiftshader.so");
-
-            const ld_preload = try std.mem.join(arena_alloc, ":", preload_libs.items);
-            try env_map.put("LD_PRELOAD", ld_preload);
-            std.debug.print("Setting LD_PRELOAD: {s}\n", .{ld_preload});
         }
 
         // Set ICU_DATA for external ICU data file (Linux)

@@ -4018,11 +4018,6 @@ ELECTROBUN_EXPORT void stopEventLoop() {
 
     std::cout << "[stopEventLoop] Initiating clean event loop exit" << std::endl;
 
-    // Release WebView2 environment synchronously while the process is alive
-    // so Chromium can clean up its window classes before DLL unload
-    g_environment.Reset();
-    g_envOptions.Reset();
-
     if (g_mainThreadId != 0) {
             PostThreadMessage(g_mainThreadId, WM_QUIT, 0, 0);
         }

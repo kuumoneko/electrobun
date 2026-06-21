@@ -398,6 +398,10 @@ async function buildNative() {
 	const nativeWrapperObj = "./src/native/win/build/nativeWrapper.obj"
 	const nativeWrapperLib = "./src/native/win/build/libNativeWrapper.dll"
 
+	const cefInclude = `./vendors/cef`;
+	const cefLib = `./vendors/cef/Release/libcef.lib`;
+	const cefWrapperLib = `./vendors/cef/build/libcef_dll_wrapper/Release/libcef_dll_wrapper.lib`;
+
 	await $`mkdir -p src/native/win/build`;
 	await $`mkdir -p smtc/build`;
 	await Promise.all([
@@ -405,8 +409,11 @@ async function buildNative() {
 			if (isNewer(nativeWrapperSource, nativeWrapperLib) || isNewer(nativeWrapperSource, nativeWrapperObj)) {
 				console.log("nativeWrapper.cpp is changed! Building...")
 				try {
+					// await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /I"${cefInclude}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`);
+					// await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" "${cefLib}" "${cefWrapperLib}" delayimp.lib /DELAYLOAD:libcef.dll libcmt.lib /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
+
 					await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`);
-					await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
+					await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" libcmt.lib /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
 				} catch (e) {
 					console.error(e);
 				}

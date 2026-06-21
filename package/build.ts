@@ -394,24 +394,29 @@ async function buildNative() {
 	const filedialogObj = "./smtc/build/filedialog.obj"
 	const filedialogLib = "./smtc/build/filedialog.dll"
 
+	const nativeWrapperSource = "./src/native/win/nativeWrapper.cpp"
+	const nativeWrapperObj = "./src/native/win/build/nativeWrapper.obj"
+	const nativeWrapperLib = "./src/native/win/build/libNativeWrapper.dll"
+
 	await $`mkdir -p src/native/win/build`;
 	await $`mkdir -p smtc/build`;
 	await Promise.all([
-		//  new Promise((res) => {
-		//   	if (isNewer(webview2Include, webview2Lib)) {
-		// 	console.log("Webview2 Library is changed! Building...")
-		//        runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`)
-		//          .then(() => res(""))
-		//          .catch((e) => {
-		//            console.error(e);
-		//            res("")
-		//          })
-		//      }
-		// else {
-		//        console.log("Webview2 Library is unchanged! Skipping...");
-		//        res("")
-		// }
-		//  }),
+		new Promise(async (res) => {
+			if (isNewer(nativeWrapperSource, nativeWrapperLib) || isNewer(nativeWrapperSource, nativeWrapperObj)) {
+				console.log("nativeWrapper.cpp is changed! Building...")
+				try {
+					await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`);
+					await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
+				} catch (e) {
+					console.error(e);
+				}
+				res("");
+			}
+			else {
+				console.log("nativeWrapper.cpp is unchanged! Skipping...")
+				res("");
+			}
+		}),
 		new Promise(async (res) => {
 			if (isNewer(smtcSource, smtcLib) || isNewer(smtcSource, smtcObj)) {
 				console.log("smtc.cpp is changed! Building...")
@@ -461,32 +466,7 @@ async function buildNative() {
 			}
 		}),
 
-		//   	if (isNewer(webview2Include, webview2Lib)) {
-		// 	console.log("Webview2 Library is changed! Building...")
-		//        runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`)
-		//          .then(() => res(""))
-		//          .catch((e) => {
-		//            console.error(e);
-		//            res("")
-		//          })
-		//      }
-		// else {
-		//        console.log("Webview2 Library is unchanged! Skipping...");
-		//        res("")
-		// }
-
 	])
-	// await Promise.all([
-	// async	() => {
-	// 		if (isNewer(webview2Include, webview2Lib)) {
-	// 			console.log("Webview2 Library is changed! Building...")
-	// 			await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`)
-	// 		}
-	// 		else {
-	// 			console.log("Webview2 Library is unchanged! Skipping...")
-	// 		}
-	// 	},
-	// ])
 }
 
 async function buildLauncher() {

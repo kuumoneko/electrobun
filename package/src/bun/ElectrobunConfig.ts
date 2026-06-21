@@ -200,6 +200,11 @@ export interface ElectrobunConfig {
 		 */
 		mac?: {
 			/**
+			 * Bundle CEF (Chromium Embedded Framework) for this platform
+			 * @default false
+			 */
+			bundleCEF?: boolean;
+			/**
 			 * Enable code signing for macOS builds
 			 * @default false
 			 */
@@ -241,6 +246,11 @@ export interface ElectrobunConfig {
 		 */
 		win?: {
 			/**
+			 * Bundle CEF (Chromium Embedded Framework) for this platform
+			 * @default false
+			 */
+			bundleCEF?: boolean;
+			/**
 			 * Default renderer for webviews when not explicitly specified
 			 * @default 'native'
 			 */
@@ -259,6 +269,11 @@ export interface ElectrobunConfig {
 		 * Linux-specific build configuration
 		 */
 		linux?: {
+			/**
+			 * Bundle CEF (Chromium Embedded Framework) for this platform
+			 * @default false
+			 */
+			bundleCEF?: boolean;
 			/**
 			 * Default renderer for webviews when not explicitly specified
 			 * @default 'native'

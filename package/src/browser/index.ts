@@ -11,7 +11,6 @@ import {
 	type WebviewTagElement,
 	type WebviewEventTypes,
 } from "./webviewtag";
-import { type WgpuTagElement, type WgpuEventTypes } from "./wgputag";
 import "./global.d.ts";
 
 const WEBVIEW_ID = window.__electrobunWebviewId;
@@ -181,8 +180,6 @@ export {
 	Electroview,
 	type WebviewTagElement,
 	type WebviewEventTypes,
-	type WgpuTagElement,
-	type WgpuEventTypes,
 };
 
 const Electrobun = {

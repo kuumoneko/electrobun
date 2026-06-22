@@ -179,6 +179,6 @@ All commands are run from the `/package` directory:
 
 ## About this fork
 
-This fork is implement for my music app.
+This fork is implemented for my music app.
 
 Visit [kuumoneko/music_player](https://github.com/kuumoneko/music_player)

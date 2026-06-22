@@ -188,10 +188,10 @@ async function findMsvcTools() {
 		console.log("Could not locate MSVC tools, using default tool names");
 	}
 }
-let cmdCounter = 0;
+
 async function runMsvcCommand(command: string) {
 	if (!VCVARSALL_PATH) return await $`${command}`;
-	const uniqueId = `${Date.now()}_${cmdCounter++}`;
+	const uniqueId = `${Date.now()}_${Math.floor(Math.random() * 10)}`;
 	const tempBat = join(process.cwd(), `temp_build_cmd_${uniqueId}.bat`);
 	const batContent = `@echo off\ncall "${VCVARSALL_PATH}" x64 >nul\n${command}`;
 	writeFileSync(tempBat, batContent);

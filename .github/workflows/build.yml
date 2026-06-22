@@ -18,7 +18,8 @@ jobs:
 
             - run: bun test.ts --release
     build-debian:
-        runs-on: macos-latest
+        needs: build-macos
+        runs-on: debian-latest
         defaults:
             run:
                 working-directory: package
@@ -35,7 +36,8 @@ jobs:
 
             - run: bun test.ts --release
     build-windows:
-        runs-on: macos-latest
+        needs: build-debian
+        runs-on: windows-latest
         defaults:
             run:
                 working-directory: package

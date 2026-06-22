@@ -2,33 +2,33 @@ name: Build All Platforms
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: package
+    build:
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        defaults:
+            run:
+                working-directory: package
 
-    steps:
-      - uses: actions/checkout@v4
+        steps:
+            - uses: actions/checkout@v4
 
-      - name: Install deps (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential cmake pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+            - name: Install deps (Linux)
+              if: runner.os == 'Linux'
+              run: |
+                  sudo apt update
+                  sudo apt install -y build-essential cmake pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev libfuse2
 
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake pkg-config
+            - name: Install deps (macOS)
+              if: runner.os == 'macOS'
+              run: brew install cmake pkg-config
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
 
-      - run: bun install
+            - run: bun install
 
-      - run: bun test.ts --release
+            - run: bun test.ts --release

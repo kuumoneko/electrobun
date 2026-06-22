@@ -94,7 +94,7 @@ let lastGitHubDownload = 0;
 async function pauseForGitHub(): Promise<void> {
 	const now = Date.now();
 	const timeSinceLastDownload = now - lastGitHubDownload;
-	const pauseDuration = 60000;
+	const pauseDuration = 500;
 	if (lastGitHubDownload > 0 && timeSinceLastDownload < pauseDuration) {
 		const remainingPause = pauseDuration - timeSinceLastDownload;
 		console.log(`Pausing ${Math.ceil(remainingPause / 1000)}s before next GitHub download...`);
@@ -814,7 +814,7 @@ async function createPlatformDistFolder() {
 	if (OS === "win") {
 		await $`powershell -command "Copy-Item -Path 'dist\\*' -Destination '${platformDistDir}\\' -Recurse -Force"`;
 	} else {
-	await $`cp -r dist/ ${platformDistDir}/`
+		await $`cp -r dist/ ${platformDistDir}/`
 	}
 	console.log(`Successfully created and populated ${platformDistDir}`);
 }

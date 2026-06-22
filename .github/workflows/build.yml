@@ -47,10 +47,33 @@ jobs:
                 working-directory: package
         steps:
             - uses: actions/checkout@v4
+            - name: Setup NuGet Cache
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.nuget/packages
+                      ${{ github.workspace }}/package/vendors/webview2
+                  key: ${{ runner.os }}-nuget-${{ hashFiles('**/package.json') }}
+                  restore-keys: |
+                      ${{ runner.os }}-nuget-
+            - name: Setup Bun Cache
+              uses: actions/cache@v4
+              with:
+                  path: ~/.bun/install/cache
+                  key: ${{ runner.os }}-bun-${{ hashFiles('**/package.json') }}
+                  restore-keys: |
+                      ${{ runner.os }}-bun-
             - uses: oven-sh/setup-bun@v2
               with:
                   bun-version: latest
 
             - run: bun install
-
+            - name: Setup Script Binaries Cache
+              uses: actions/cache@v4
+              with:
+                  path: package/vendors/binaries
+                  # This creates a cache specific to your test.ts file changes
+                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
+                  restore-keys: |
+                      ${{ runner.os }}-script-deps-
             - run: bun test.ts --release

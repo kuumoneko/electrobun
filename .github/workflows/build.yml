@@ -28,6 +28,7 @@ jobs:
             - run: |
                   sudo apt update
                   sudo apt install -y build-essential cmake pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev libharfbuzz-dev
+            - run: pkg-config --cflags pango harfbuzz
             - uses: oven-sh/setup-bun@v2
               with:
                   bun-version: latest

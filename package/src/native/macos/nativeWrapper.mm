@@ -4022,26 +4022,26 @@ runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters
 
 
 
-// @implementation StatusItemTarget
-//     - (void)statusItemClicked:(id)sender {
-//         if (self.zigHandler) {                    
-//             self.zigHandler(self.trayId, "");                        
-//         }
-//     }
-//     - (void)menuItemClicked:(id)sender {
-//         NSMenuItem *menuItem = (NSMenuItem *)sender;
-//         NSString *action = menuItem.representedObject;
-//         if (!action) {
-//             NSLog(@"No action found for menu item");
-//             return;
-//         }
-//         if (!self.zigHandler) {
-//             NSLog(@"No zig handler found for menu item");
-//             return;
-//         }
-//         self.zigHandler(self.trayId, [action UTF8String]);
-//     }
-// @end
+@implementation StatusItemTarget
+    - (void)statusItemClicked:(id)sender {
+        if (self.zigHandler) {                    
+            self.zigHandler(self.trayId, "");                        
+        }
+    }
+    - (void)menuItemClicked:(id)sender {
+        NSMenuItem *menuItem = (NSMenuItem *)sender;
+        NSString *action = menuItem.representedObject;
+        if (!action) {
+            NSLog(@"No action found for menu item");
+            return;
+        }
+        if (!self.zigHandler) {
+            NSLog(@"No zig handler found for menu item");
+            return;
+        }
+        self.zigHandler(self.trayId, [action UTF8String]);
+    }
+@end
 
 
 // C++ classes for CEF:

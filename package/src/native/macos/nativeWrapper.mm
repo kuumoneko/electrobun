@@ -24,7 +24,7 @@
 //     cached = (val && strcmp(val, "1") == 0) ? 1 : 0;
 //     return cached == 1;
 // }
-// #import <UserNotifications/UserNotifications.h>
+#import <UserNotifications/UserNotifications.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>

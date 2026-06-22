@@ -71,7 +71,7 @@ jobs:
             - name: Setup Script Binaries Cache
               uses: actions/cache@v4
               with:
-                  path: package/vendors/binaries
+                  path: package/vendors
                   # This creates a cache specific to your test.ts file changes
                   key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
                   restore-keys: |

@@ -19,7 +19,7 @@ jobs:
             - run: bun test.ts --release
     build-debian:
         needs: build-macos
-        runs-on: debian-latest
+        runs-on: ubuntu-latest
         defaults:
             run:
                 working-directory: package

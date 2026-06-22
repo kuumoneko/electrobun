@@ -471,7 +471,7 @@ async function vendorLinuxDeps() {
 		"build-essential", "cmake", "pkg-config",
 		"libgtk-3-dev", "libwebkit2gtk-4.1-dev",
 		"libayatana-appindicator3-dev", "librsvg2-dev",
-		"fuse", "libfuse2",
+		"fuse", "libfuse2", "libpango1.0-dev", "libharfbuzz-dev"
 	];
 
 	const distroInfo = await $`grep -E '^(ID|ID_LIKE)=' /etc/os-release`.catch(() => null);

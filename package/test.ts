@@ -469,7 +469,7 @@ async function vendorLinuxDeps() {
 
 	const requiredPackages = [
 		"build-essential", "cmake", "pkg-config",
-		"libgtk-3-dev", "libwebkit2gtk-4.1-dev",
+		"libgtk-3-dev", "libwebkit2gtk-4.0-dev",
 		"libayatana-appindicator3-dev", "librsvg2-dev",
 		"fuse", "libfuse2", "libpango1.0-dev", "libharfbuzz-dev"
 	];

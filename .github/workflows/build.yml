@@ -2,45 +2,100 @@ name: Build All Platforms
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
-    # build-macos:
-    #     runs-on: macos-latest
-    #     defaults:
-    #         run:
-    #             working-directory: package
-    #     steps:
-    #         - uses: actions/checkout@v4
-    #         - run: brew install cmake pkg-config
-    #         - uses: oven-sh/setup-bun@v2
-    #           with:
-    #               bun-version: latest
+    build-macos:
+        runs-on: macos-latest
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
 
-    #         - run: bun install
+            # 1. Cache Homebrew formulas to speed up cmake and pkg-config installs
+            - name: Setup Homebrew Cache
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/Library/Caches/Homebrew
+                      /usr/local/Homebrew
+                  key: ${{ runner.os }}-brew-${{ hashFiles('**/package.json') }}
+                  restore-keys: ${{ runner.os }}-brew-
 
-    #         - run: bun test.ts --release
-    # build-debian:
-    #     needs: build-macos
-    #     runs-on: ubuntu-22.04
-    #     defaults:
-    #         run:
-    #             working-directory: package
-    #     steps:
-    #         - uses: actions/checkout@v4
-    #         - run: |
-    #               sudo apt-get update
-    #               sudo apt-get install -y build-essential cmake pkg-config libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev libharfbuzz-dev
-    #         - run: pkg-config --cflags harfbuzz pango gtk+-3.0
-    #         - uses: oven-sh/setup-bun@v2
-    #           with:
-    #               bun-version: latest
+            - run: brew install cmake pkg-config
 
-    #         - run: bun install
+            # 2. Cache Bun Internal Dependencies
+            - name: Setup Bun Cache
+              uses: actions/cache@v4
+              with:
+                  path: ~/.bun/install/cache
+                  key: ${{ runner.os }}-bun-${{ hashFiles('package/bun.lockb', 'package/package.json') }}
+                  restore-keys: ${{ runner.os }}-bun-
 
-    #         - name: run Build
-    #           env:
-    #               PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-    #           run: bun test.ts --release
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - run: bun install
+
+            # 3. Cache the heavy custom downloaded binaries from test.ts
+            - name: Setup Script Binaries Cache
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/package/vendors/binaries
+                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
+                  restore-keys: ${{ runner.os }}-script-deps-
+
+            - run: bun test.ts --release
+    build-linux:
+        needs: build-macos
+        runs-on: ubuntu-22.04
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
+
+            # 1. Cache APT package archives to speed up downloading massive Linux UI dependencies
+            - name: Setup APT Cache
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/apt/archives
+                  key: ${{ runner.os }}-apt-${{ hashFiles('**/package.json') }}
+                  restore-keys: ${{ runner.os }}-apt-
+
+            - run: |
+                  sudo apt-get update
+                  sudo apt-get install -y build-essential cmake pkg-config libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev libharfbuzz-dev
+
+            - run: pkg-config --cflags harfbuzz pango gtk+-3.0
+
+            # 2. Cache Bun Internal Dependencies
+            - name: Setup Bun Cache
+              uses: actions/cache@v4
+              with:
+                  path: ~/.bun/install/cache
+                  key: ${{ runner.os }}-bun-${{ hashFiles('package/bun.lockb', 'package/package.json') }}
+                  restore-keys: ${{ runner.os }}-bun-
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - run: bun install
+
+            # 3. Cache the heavy custom downloaded binaries from test.ts
+            - name: Setup Script Binaries Cache
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/package/vendors/binaries
+                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
+                  restore-keys: ${{ runner.os }}-script-deps-
+
+            - name: run Build
+              env:
+                  PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+              run: bun test.ts --release
     build-windows:
-        # needs: build-debian
+        needs: build-linux
         runs-on: windows-latest
         defaults:
             run:
@@ -66,7 +121,6 @@ jobs:
             - uses: oven-sh/setup-bun@v2
               with:
                   bun-version: latest
-
             - run: bun install
             - name: Setup Script Binaries Cache
               uses: actions/cache@v4

@@ -816,7 +816,7 @@ async function copyToDist() {
 		$`cp vendors/zig-zstd/zig-zstd${binExt} dist/zig-zstd${binExt}`,
 		$`cp src/npmbin/index.js dist/npmbin.js`,
 		$`cp src/cli/build/electrobun${binExt} dist/electrobun${binExt}`,
-		$`cp src/mpv/libmpv.dll dist/libmpv.dll`,
+		$`cp src/mpv/build/libmpv${libExt} dist/libmpv${libExt}`,
 		$`mkdir -p bin && cp src/cli/build/electrobun${binExt} bin/electrobun${binExt}`,
 		copyApiFiles(),
 	]);

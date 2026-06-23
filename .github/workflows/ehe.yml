@@ -121,6 +121,9 @@ jobs:
     # Phase 3: Build libmpv (Dependencies compiled statically, libmpv bundled shared)
     build-libmpv:
         runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: package
         steps:
             - name: Checkout mpv Core
               uses: actions/checkout@v4
@@ -148,59 +151,77 @@ jobs:
               if: steps.cache-mpv-ffmpeg.outputs.cache-hit != 'true'
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
-                  cd ffmpeg-static
+                  cd src/mpv/ffmpeg
                   ./configure \
                     --prefix=${{ env.MPVPREFIX }} \
                     --enable-static --disable-shared --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                    --disable-avdevice --disable-postproc --disable-everything \
-                    --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
+                    --disable-avdevice \
+                    --disable-postproc --disable-everything \
+                    --enable-avfilter --enable-swscale \
+                    --enable-network --enable-zlib --enable-openssl \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder="$DECODERS" \
-                    --enable-demuxer="$DEMUXERS" \
-                    --enable-parser="$PARSERS" \
-                    --enable-bsf="$BSFS" \
-                    --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=null,wav --enable-encoder=pcm_s16le
                   make -j$(nproc) install
 
             - name: Build Dependency - libplacebo (Static)
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
-                  cd libplacebo
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+                    https://github.com/haasn/libplacebo.git
+                  cd src/mpv/libplacebo
                   git submodule update --init --depth 1
-                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig" meson setup build \
-                    -Ddefault_library=static -Dbuildtype=release -Ddemos=false -Dtests=false -Dbench=false \
-                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled --prefix ${{ env.MPVPREFIX }}
+                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix ${{ env.MPVPREFIX }}
                   meson install -C build
 
             - name: Build Dependency - libass (Static)
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
-                  cd libass
-                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig" meson setup build \
-                    -Ddefault_library=static -Dbuildtype=release -Dfontconfig=disabled -Drequire-system-font-provider=false \
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+                    https://github.com/libass/libass.git
+                  cd src/mpv/libass
+                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled -Drequire-system-font-provider=false \
                     --prefix ${{ env.MPVPREFIX }}
                   meson install -C build
 
             - name: Build libmpv (Shared)
               run: |
-                  cd mpv
-                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig" meson setup build \
-                    -Dcplayer=false -Dlibmpv=true -Ddefault_library=shared -Dbuildtype=release \
-                    -Dbuild-date=false -Dgpl=false -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-                    -Dalsa=enabled -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+                  cd src/mpv
+                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dalsa=enabled \
+                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
                     -Dx11=disabled -Dwayland=disabled -Ddrm=disabled -Dgbm=disabled \
                     -Dvdpau=disabled -Dvaapi=disabled -Dcuda-hwaccel=disabled \
-                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled -Dlibarchive=disabled -Drubberband=disabled \
-                    -Ccdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled -Duchardet=disabled -Dvapoursynth=disabled \
-                    -Diconv=disabled -Dzlib=disabled -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
                     -Doss-audio=disabled -Dsndio=disabled -Dopenal=disabled \
-                    -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled -Ccaca=disabled -Dsixel=disabled \
+                    -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled \
+                    -Dcaca=disabled -Dsixel=disabled \
                     -Dmanpage-build=disabled -Dtests=false \
                     -Dc_args='-ffunction-sections -fdata-sections' \
-                    -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
+                     -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
                   meson compile -C build
                   strip build/libmpv.so
+                  ls -lh build/libmpv.so
 
             - name: Upload Shared libmpv Artifact
               uses: actions/upload-artifact@v4

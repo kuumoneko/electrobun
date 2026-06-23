@@ -231,3 +231,9 @@ jobs:
               run: |
                   cd package
                   bun build.ts --release
+            - name: Upload Completed Package Folder
+              uses: actions/upload-artifact@v4
+              with:
+                  name: completed-linux-package
+                  path: package/
+                  if-no-files-found: error

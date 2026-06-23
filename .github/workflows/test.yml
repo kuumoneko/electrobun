@@ -44,6 +44,7 @@ jobs:
             - name: Build shared ffmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
               run: |
+                  rm -rf ffmpeg
                   sudo apt install -y nasm pkg-config
                   git clone --depth 1 --branch $FFMPEG_VERSION \
                       https://git.ffmpeg.org/ffmpeg.git ffmpeg

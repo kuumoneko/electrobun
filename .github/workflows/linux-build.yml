@@ -177,43 +177,40 @@ jobs:
                     -Dc_args='-ffunction-sections -fdata-sections' \
                      -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
                   meson compile -C build
-                  strip build/libmpv.so
+                  mkdir -p ${{ github.workspace }}/staging-libmpv
+                  cp mpv/build/libmpv.so ${{ github.workspace }}/staging-libmpv/
+                  strip ${{ github.workspace }}/staging-libmpv/libmpv.so
 
             - name: Upload libmpv
               uses: actions/upload-artifact@v4
               with:
                   name: libmpv-linux-x86_64
-                  path: package/mpv/build/libmpv.so
+                  path: ${{ github.workspace }}/staging-libmpv/*
 
             # ── SMTC + FileDialog ───────────────────────────────────────────
             - name: Install smtc deps
               run: sudo apt install -y libdbus-1-dev libx11-dev
 
-            - name: Build libsmtc.so
+            - name: Build smtc + filedialog
               run: |
-                  g++ -shared -fPIC -o libsmtc.so \
+                  mkdir -p ${{ github.workspace }}/staging-smtc
+                  g++ -shared -fPIC -o ${{ github.workspace }}/staging-smtc/libsmtc.so \
                     src/smtc/linux/smtc.cpp \
                     $(pkg-config --cflags --libs dbus-1) \
                     -std=c++20 -O2 \
                     -Wl,-soname,libsmtc.so
-                  strip libsmtc.so
-
-            - name: Build libfiledialog.so
-              run: |
-                  gcc -shared -fPIC -o libfiledialog.so \
+                  gcc -shared -fPIC -o ${{ github.workspace }}/staging-smtc/libfiledialog.so \
                     src/smtc/linux/filedialog.cpp \
                     src/smtc/linux/tinyfiledialogs/tinyfiledialogs.c \
                     -Isrc/smtc/linux \
                     -lX11 -O2 -D_GNU_SOURCE
-                  strip libfiledialog.so
+                  strip ${{ github.workspace }}/staging-smtc/libsmtc.so ${{ github.workspace }}/staging-smtc/libfiledialog.so
 
             - name: Upload smtc
               uses: actions/upload-artifact@v4
               with:
                   name: smtc-linux-x86_64
-                  path: |
-                      libsmtc.so
-                      libfiledialog.so
+                  path: ${{ github.workspace }}/staging-smtc/*
 
     build-electrobun:
         needs: build-deps
@@ -235,6 +232,7 @@ jobs:
                   cp ${{ github.workspace }}/artifacts/libmpv-linux-x86_64/libmpv.so src/mpv/ 2>/dev/null || true
                   cp ${{ github.workspace }}/artifacts/smtc-linux-x86_64/libsmtc.so src/smtc/build/ 2>/dev/null || true
                   cp ${{ github.workspace }}/artifacts/smtc-linux-x86_64/libfiledialog.so src/smtc/build/ 2>/dev/null || true
+                  echo "Artifacts placed"
 
             # ── System deps for electrobun build ───────────────────────────
             - name: Install build deps
@@ -263,7 +261,7 @@ jobs:
               id: cache-zig
               uses: actions/cache@v4
               with:
-                  path: vendors/zig
+                  path: package/vendors/zig
                   key: linux-zig-${{ env.ZIG_VERSION }}
 
             - name: Download Zig
@@ -282,7 +280,7 @@ jobs:
               id: cache-bsdiff
               uses: actions/cache@v4
               with:
-                  path: vendors/zig-bsdiff
+                  path: package/vendors/zig-bsdiff
                   key: linux-bsdiff-${{ env.BSDIFF_VERSION }}
 
             - name: Download zig-bsdiff
@@ -301,7 +299,7 @@ jobs:
               id: cache-zstd
               uses: actions/cache@v4
               with:
-                  path: vendors/zig-zstd
+                  path: package/vendors/zig-zstd
                   key: linux-zstd-${{ env.ZSTD_VERSION }}
 
             - name: Download zig-zstd
@@ -321,7 +319,7 @@ jobs:
               id: cache-asar
               uses: actions/cache@v4
               with:
-                  path: vendors/zig-asar
+                  path: package/vendors/zig-asar
                   key: linux-asar-${{ env.ASAR_VERSION }}
 
             - name: Download zig-asar

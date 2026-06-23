@@ -213,13 +213,15 @@ jobs:
                     -Dc_args='-ffunction-sections -fdata-sections' \
                      -Dc_link_args='-Wl,--gc-sections -lstdc++'
                   meson compile -C build
-                  strip build/libmpv-2.dll
+                  mkdir -p ${{ github.workspace }}/staging-libmpv
+                  cp mpv/build/libmpv-2.dll ${{ github.workspace }}/staging-libmpv/
+                  strip ${{ github.workspace }}/staging-libmpv/libmpv-2.dll
 
             - name: Upload libmpv
               uses: actions/upload-artifact@v4
               with:
                   name: libmpv-windows-x86_64
-                  path: package/mpv/build/libmpv-2.dll
+                  path: ${{ github.workspace }}/staging-libmpv/*
 
             # ── SMTC + FileDialog + AUMID (MSVC) ──────────────────────────
             - uses: ilammy/msvc-dev-cmd@v1
@@ -246,20 +248,16 @@ jobs:
                     /link /out:src\smtc\build\aumid.dll ole32.lib shell32.lib
                   if exist src\smtc\build\aumid.dll echo aumid.dll built
 
+            - name: Stage smtc artifacts
+              run: |
+                  New-Item -ItemType Directory -Force -Path ${{ github.workspace }}\staging-smtc
+                  Copy-Item src\smtc\build\* ${{ github.workspace }}\staging-smtc\
+
             - name: Upload smtc
               uses: actions/upload-artifact@v4
               with:
                   name: smtc-windows-x86_64
-                  path: |
-                      package/src/smtc/build/smtc.dll
-                      package/src/smtc/build/smtc.lib
-                      package/src/smtc/build/smtc.exp
-                      package/src/smtc/build/filedialog.dll
-                      package/src/smtc/build/filedialog.lib
-                      package/src/smtc/build/filedialog.exp
-                      package/src/smtc/build/aumid.dll
-                      package/src/smtc/build/aumid.lib
-                      package/src/smtc/build/aumid.exp
+                  path: ${{ github.workspace }}\staging-smtc\*
 
     build-electrobun:
         needs: build-deps
@@ -302,7 +300,7 @@ jobs:
               id: cache-zig
               uses: actions/cache@v4
               with:
-                  path: vendors\zig
+                  path: package\vendors\zig
                   key: windows-zig-${{ env.ZIG_VERSION }}
 
             - name: Download Zig
@@ -321,7 +319,7 @@ jobs:
               id: cache-bsdiff
               uses: actions/cache@v4
               with:
-                  path: vendors\zig-bsdiff
+                  path: package\vendors\zig-bsdiff
                   key: windows-bsdiff-${{ env.BSDIFF_VERSION }}
 
             - name: Download zig-bsdiff
@@ -338,7 +336,7 @@ jobs:
               id: cache-zstd
               uses: actions/cache@v4
               with:
-                  path: vendors\zig-zstd
+                  path: package\vendors\zig-zstd
                   key: windows-zstd-${{ env.ZSTD_VERSION }}
 
             - name: Download zig-zstd
@@ -355,7 +353,7 @@ jobs:
               id: cache-webview2
               uses: actions/cache@v4
               with:
-                  path: vendors\webview2
+                  path: package\vendors\webview2
                   key: windows-webview2
 
             - name: NuGet restore WebView2

@@ -14,7 +14,6 @@ env:
     BSDIFF_VERSION: 0.1.19
     ZSTD_VERSION: 0.1.3
     ASAR_VERSION: 0.2.2
-    ARCH: ${{ (runner.arch == 'ARM64' && 'aarch64') || 'x86_64' }}
 
 jobs:
     build-deps:
@@ -24,6 +23,10 @@ jobs:
                 working-directory: package
         steps:
             - uses: actions/checkout@v4
+
+            - name: Set ARCH env
+              run: |
+                echo "ARCH=${{ runner.arch == 'ARM64' && 'aarch64' || 'x86_64' }}" >> $GITHUB_ENV
 
             - name: Install system deps
               run: |
@@ -184,38 +187,35 @@ jobs:
                     -Dc_args='-ffunction-sections -fdata-sections' \
                      -Dc_link_args='-Wl,-dead_strip'
                   meson compile -C build
-                  strip -S build/libmpv.dylib
+                  mkdir -p ${{ github.workspace }}/staging-libmpv
+                  cp mpv/build/libmpv.dylib ${{ github.workspace }}/staging-libmpv/
+                  strip -S ${{ github.workspace }}/staging-libmpv/libmpv.dylib
 
             - name: Upload libmpv
               uses: actions/upload-artifact@v4
               with:
                   name: libmpv-macos-${{ env.ARCH }}
-                  path: package/mpv/build/libmpv.dylib
+                  path: ${{ github.workspace }}/staging-libmpv/*
 
             # ── SMTC + FileDialog ───────────────────────────────────────────
-            - name: Build libsmtc.dylib
+            - name: Build smtc + filedialog
               run: |
-                  clang++ -shared -fPIC -o libsmtc.dylib \
+                  mkdir -p ${{ github.workspace }}/staging-smtc
+                  clang++ -shared -fPIC -o ${{ github.workspace }}/staging-smtc/libsmtc.dylib \
                     src/smtc/macos/smtc.mm \
                     -framework MediaPlayer -framework AppKit -framework Cocoa \
                     -std=c++20 -O2 -ObjC++
-                  strip -S libsmtc.dylib
-
-            - name: Build libfiledialog.dylib
-              run: |
-                  clang++ -shared -fPIC -o libfiledialog.dylib \
+                  clang++ -shared -fPIC -o ${{ github.workspace }}/staging-smtc/libfiledialog.dylib \
                     src/smtc/macos/filedialog.mm \
                     -framework AppKit -framework Cocoa \
                     -std=c++20 -O2 -ObjC++
-                  strip -S libfiledialog.dylib
+                  strip -S ${{ github.workspace }}/staging-smtc/libsmtc.dylib ${{ github.workspace }}/staging-smtc/libfiledialog.dylib
 
             - name: Upload smtc
               uses: actions/upload-artifact@v4
               with:
                   name: smtc-macos-${{ env.ARCH }}
-                  path: |
-                      libsmtc.dylib
-                      libfiledialog.dylib
+                  path: ${{ github.workspace }}/staging-smtc/*
 
     build-electrobun:
         needs: build-deps
@@ -225,6 +225,10 @@ jobs:
                 working-directory: package
         steps:
             - uses: actions/checkout@v4
+
+            - name: Set ARCH env
+              run: |
+                echo "ARCH=${{ runner.arch == 'ARM64' && 'aarch64' || 'x86_64' }}" >> $GITHUB_ENV
 
             - name: Download artifacts
               uses: actions/download-artifact@v4
@@ -263,7 +267,7 @@ jobs:
               id: cache-zig
               uses: actions/cache@v4
               with:
-                  path: vendors/zig
+                  path: package/vendors/zig
                   key: macos-zig-${{ env.ZIG_VERSION }}
 
             - name: Download Zig
@@ -287,7 +291,7 @@ jobs:
               id: cache-bsdiff
               uses: actions/cache@v4
               with:
-                  path: vendors/zig-bsdiff
+                  path: package/vendors/zig-bsdiff
                   key: macos-bsdiff-${{ env.BSDIFF_VERSION }}
 
             - name: Download zig-bsdiff
@@ -307,7 +311,7 @@ jobs:
               id: cache-zstd
               uses: actions/cache@v4
               with:
-                  path: vendors/zig-zstd
+                  path: package/vendors/zig-zstd
                   key: macos-zstd-${{ env.ZSTD_VERSION }}
 
             - name: Download zig-zstd
@@ -328,7 +332,7 @@ jobs:
               id: cache-asar
               uses: actions/cache@v4
               with:
-                  path: vendors/zig-asar
+                  path: package/vendors/zig-asar
                   key: macos-asar-${{ env.ASAR_VERSION }}
 
             - name: Download zig-asar

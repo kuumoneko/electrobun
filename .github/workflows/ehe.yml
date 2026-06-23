@@ -78,6 +78,9 @@ jobs:
     # Phase 2: Build Native SMTC and FileDialog C++ Bindings
     build-smtc-native:
         runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: package
         steps:
             - uses: actions/checkout@v4
 
@@ -88,7 +91,7 @@ jobs:
 
             - name: Compile libsmtc and libfiledialog
               run: |
-                  cd smtc
+                  cd src/smtc
                   mkdir -p build
 
                   # Build SMTC Binding
@@ -111,8 +114,8 @@ jobs:
               with:
                   name: smtc-linux-x86_64
                   path: |
-                      smtc/build/libsmtc.so
-                      smtc/build/libfiledialog.so
+                      src/smtc/build/libsmtc.so
+                      src/smtc/build/libfiledialog.so
 
     # Phase 3: Build libmpv (Dependencies compiled statically, libmpv bundled shared)
     build-libmpv:

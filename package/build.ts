@@ -849,7 +849,7 @@ async function copyToDist() {
 			console.warn("⚠️ Warning: Native SMTC/FileDialog binaries not found in build directory.");
 		}
 
-		const stagingPath = join(process.cwd(), "staging");
+		const stagingPath = join(process.cwd(), "..", "staging");
 		if (existsSync(stagingPath)) {
 			console.log("Copying staged FFmpeg shared libraries to dist...");
 			await $`cp ${stagingPath}/libavutil.so* dist/`;

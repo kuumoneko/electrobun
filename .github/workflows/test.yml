@@ -128,39 +128,58 @@ jobs:
 
             - name: Build Dependency - libplacebo (Static)
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+                    https://github.com/haasn/libplacebo.git
                   cd libplacebo
                   git submodule update --init --depth 1
-                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig" meson setup build -Ddefault_library=static -Dbuildtype=release -Ddemos=false -Dtests=false -Dbench=false -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled --prefix ${{ env.MPVPREFIX }}
+                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix ${{ env.MPVPREFIX }}
                   meson install -C build
 
             - name: Build Dependency - libass (Static)
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+                    https://github.com/libass/libass.git
                   cd libass
-                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig" meson setup build -Ddefault_library=static -Dbuildtype=release -Dfontconfig=disabled -Drequire-system-font-provider=false --prefix ${{ env.MPVPREFIX }}
+                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled -Drequire-system-font-provider=false \
+                    --prefix ${{ env.MPVPREFIX }}
                   meson install -C build
 
             - name: Build libmpv (Shared)
               run: |
                   cd package/src/mpv
-                  mkdir -p build
-                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig" meson setup build \
-                    -Dcplayer=false -Dlibmpv=true -Ddefault_library=shared -Dbuildtype=release \
-                    -Dbuild-date=false -Dgpl=false -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-                    -Dalsa=enabled -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+                  PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dalsa=enabled \
+                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
                     -Dx11=disabled -Dwayland=disabled -Ddrm=disabled -Dgbm=disabled \
                     -Dvdpau=disabled -Dvaapi=disabled -Dcuda-hwaccel=disabled \
-                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled -Dlibarchive=disabled -Drubberband=disabled \
-                    -Ccdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled -Duchardet=disabled -Dvapoursynth=disabled \
-                    -Diconv=disabled -Dzlib=disabled -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
                     -Doss-audio=disabled -Dsndio=disabled -Dopenal=disabled \
-                    -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled -Ccaca=disabled -Dsixel=disabled \
+                    -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled \
+                    -Dcaca=disabled -Dsixel=disabled \
                     -Dmanpage-build=disabled -Dtests=false \
                     -Dc_args='-ffunction-sections -fdata-sections' \
-                    -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
+                     -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
                   meson compile -C build
                   strip build/libmpv.so
+                  ls -lh build/libmpv.so
 
             # ==========================================
             # STEP 4: COMPILE ELECTROBUN APPLICATION

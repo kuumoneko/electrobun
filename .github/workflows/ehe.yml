@@ -148,7 +148,7 @@ jobs:
               if: steps.cache-mpv-ffmpeg.outputs.cache-hit != 'true'
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
-                  cd fmpeg-static
+                  cd ffmpeg-static
                   ./configure \
                     --prefix=${{ env.MPVPREFIX }} \
                     --enable-static --disable-shared --enable-pic --enable-small \

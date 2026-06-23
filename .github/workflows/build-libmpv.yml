@@ -79,6 +79,7 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
+            -Dfribidi=disabled -Dharfbuzz=disabled -Dfontconfig=disabled \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 
@@ -91,14 +92,14 @@ jobs:
             -Ddefault_library=shared -Dbuildtype=release \
             -Dbuild-date=false -Dgpl=false \
             -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-            -Dlibcurl=enabled -Dalsa=enabled \
+            -Dalsa=enabled \
             -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
             -Dx11=disabled -Dwayland=disabled -Ddrm=disabled -Dgbm=disabled \
             -Dvdpau=disabled -Dvaapi=disabled -Dcuda-hwaccel=disabled \
             -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
             -Dlibarchive=disabled -Drubberband=disabled \
             -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
-            -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
+            -Duchardet=disabled -Dvapoursynth=disabled \
             -Diconv=disabled -Dzlib=disabled \
             -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
             -Doss-audio=disabled -Dsndio=disabled -Dopenal=disabled \
@@ -159,12 +160,13 @@ jobs:
       - name: Build ffmpeg (audio-only)
         if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
+          PREFIX="$(cygpath -u '${{ env.PREFIX }}')"
           pacman --noconfirm -S --needed make diffutils
           git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
             https://git.ffmpeg.org/ffmpeg.git ffmpeg
           cd ffmpeg
           ./configure \
-            --prefix=${{ env.PREFIX }} \
+            --prefix=$PREFIX \
             --enable-static --disable-shared --enable-pic --enable-small \
             --disable-doc --disable-debug --disable-programs \
             --disable-avdevice --disable-avfilter --disable-swscale \
@@ -180,6 +182,7 @@ jobs:
 
       - name: Build libplacebo
         run: |
+          PREFIX="$(cygpath -u '${{ env.PREFIX }}')"
           git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
             https://github.com/haasn/libplacebo.git
           cd libplacebo
@@ -188,29 +191,32 @@ jobs:
             -Ddefault_library=static -Dbuildtype=release \
             -Ddemos=false -Dtests=false -Dbench=false \
             -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
-            --prefix ${{ env.PREFIX }}
+            --prefix $PREFIX
           meson install -C build
 
       - name: Build libass
         run: |
+          PREFIX="$(cygpath -u '${{ env.PREFIX }}')"
           git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
             https://github.com/libass/libass.git
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            --prefix ${{ env.PREFIX }}
+            -Dfribidi=disabled -Dharfbuzz=disabled -Dfontconfig=disabled \
+            --prefix $PREFIX
           meson install -C build
 
       - name: Build libmpv
         run: |
+          PREFIX="$(cygpath -u '${{ env.PREFIX }}')"
           cd mpv
-          PKG_CONFIG_PATH=${{ env.PREFIX }}/lib/pkgconfig \
+          PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig \
           meson setup build \
             -Dcplayer=false -Dlibmpv=true \
             -Ddefault_library=shared -Dbuildtype=release \
             -Dbuild-date=false -Dgpl=false \
             -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-            -Dlibcurl=disabled -Dwasapi=enabled -Dwin32-smtc=disabled \
+            -Dwasapi=enabled -Dwin32-smtc=disabled \
             -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
             -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
             -Dd3d11=disabled -Ddirect3d=disabled \
@@ -300,6 +306,7 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
+            -Dfribidi=disabled -Dharfbuzz=disabled -Dfontconfig=disabled \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 
@@ -312,7 +319,7 @@ jobs:
             -Ddefault_library=shared -Dbuildtype=release \
             -Dbuild-date=false -Dgpl=false \
             -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-            -Dlibcurl=enabled -Dcoreaudio=enabled \
+            -Dcoreaudio=enabled \
             -Dcocoa=disabled -Dswift-build=disabled \
             -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
             -Dmacos-touchbar=disabled \

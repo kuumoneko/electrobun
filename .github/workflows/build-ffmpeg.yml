@@ -1,10 +1,11 @@
-name: Build FFmpeg shared libraries
+name: Build FFmpeg
 
 on:
-    workflow_run:
-        workflows: ["Build libmpv (audio-only)"]
-        types:
-            - completed
+    workflow_dispatch:
+    push:
+        branches: [main]
+        paths:
+            - "ffmpeg/**"
 
 env:
     PREFIX: ${{ github.workspace }}/prefix
@@ -41,22 +42,12 @@ jobs:
                     --disable-postproc --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-                      vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-                      pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-                      pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-                      pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-                      pcm_u32le,pcm_u32be,pcm_s8, \
-                      dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-                      eac3,mlp,wavpack,tta,cook,shorten,tak, \
-                      mp1,mp1float,mp2,mp2float,mp3,mp3float \
-                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-                      matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-                      image2,pcm_alaw,pcm_mulaw,flv \
-                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
-                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
-                    --enable-muxer=mp4,mov,null,wav \
-                    --enable-encoder=aac,pcm_s16le
+                    --enable-decoder='aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float' \
+                    --enable-demuxer='aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv' \
+                    --enable-parser='aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis' \
+                    --enable-bsf='aac_adtstoasc,extract_extradata,mp3_header_decompress' \
+                    --enable-muxer='mp4,mov,null,wav' \
+                    --enable-encoder='aac,pcm_s16le'
                   make -j$(nproc) install
 
             - name: Stage shared libraries
@@ -87,7 +78,9 @@ jobs:
                   msystem: UCRT64
                   update: true
                   install: >-
-                      mingw-w64-ucrt-x86_64-{toolchain,nasm,pkgconf}
+                      mingw-w64-ucrt-x86_64-gcc
+                      mingw-w64-ucrt-x86_64-nasm
+                      mingw-w64-ucrt-x86_64-pkgconf
 
             - name: Cache FFmpeg
               id: cache-ffmpeg
@@ -112,22 +105,12 @@ jobs:
                     --disable-postproc --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-                      vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-                      pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-                      pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-                      pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-                      pcm_u32le,pcm_u32be,pcm_s8, \
-                      dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-                      eac3,mlp,wavpack,tta,cook,shorten,tak, \
-                      mp1,mp1float,mp2,mp2float,mp3,mp3float \
-                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-                      matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-                      image2,pcm_alaw,pcm_mulaw,flv \
-                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
-                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
-                    --enable-muxer=mp4,mov,null,wav \
-                    --enable-encoder=aac,pcm_s16le
+                    --enable-decoder='aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float' \
+                    --enable-demuxer='aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv' \
+                    --enable-parser='aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis' \
+                    --enable-bsf='aac_adtstoasc,extract_extradata,mp3_header_decompress' \
+                    --enable-muxer='mp4,mov,null,wav' \
+                    --enable-encoder='aac,pcm_s16le'
                   make -j$(nproc) install
 
             - name: Stage shared libraries
@@ -137,7 +120,6 @@ jobs:
                   cp ${{ env.PREFIX }}/bin/avformat-*.dll    ${{ env.STAGING }}/
                   cp ${{ env.PREFIX }}/bin/avcodec-*.dll     ${{ env.STAGING }}/
                   cp ${{ env.PREFIX }}/bin/swresample-*.dll  ${{ env.STAGING }}/
-                  # Also copy import libs (optional, for linking)
                   cp ${{ env.PREFIX }}/lib/avutil*.dll.a     ${{ env.STAGING }}/ 2>/dev/null || true
                   cp ${{ env.PREFIX }}/lib/avformat*.dll.a   ${{ env.STAGING }}/ 2>/dev/null || true
                   cp ${{ env.PREFIX }}/lib/avcodec*.dll.a    ${{ env.STAGING }}/ 2>/dev/null || true
@@ -180,22 +162,12 @@ jobs:
                     --disable-postproc --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-                      vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-                      pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-                      pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-                      pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-                      pcm_u32le,pcm_u32be,pcm_s8, \
-                      dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-                      eac3,mlp,wavpack,tta,cook,shorten,tak, \
-                      mp1,mp1float,mp2,mp2float,mp3,mp3float \
-                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-                      matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-                      image2,pcm_alaw,pcm_mulaw,flv \
-                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
-                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
-                    --enable-muxer=mp4,mov,null,wav \
-                    --enable-encoder=aac,pcm_s16le
+                    --enable-decoder='aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float' \
+                    --enable-demuxer='aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv' \
+                    --enable-parser='aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis' \
+                    --enable-bsf='aac_adtstoasc,extract_extradata,mp3_header_decompress' \
+                    --enable-muxer='mp4,mov,null,wav' \
+                    --enable-encoder='aac,pcm_s16le'
                   make -j$(sysctl -n hw.logicalcpu) install
 
             - name: Stage shared libraries

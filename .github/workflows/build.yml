@@ -1,7 +1,7 @@
 name: Build All Platforms
 on:
     workflow_run:
-        workflows: ["Build FFmpeg shared libraries"]
+        workflows: ["Build libmpv"]
         types:
             - completed
 

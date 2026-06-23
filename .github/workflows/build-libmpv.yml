@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y meson ninja-build pkg-config nasm \
-            libasound2-dev libcurl4-openssl-dev
+             libasound2-dev libcurl4-openssl-dev libvulkan-dev
 
       - name: Cache ffmpeg
         id: cache-ffmpeg
@@ -134,7 +134,17 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-{toolchain,meson,ninja,pkgconf,cmake,nasm,curl,libcurl,openssl,zlib}
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-g++
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-libcurl
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-zlib
 
       - name: Cache ffmpeg
         id: cache-ffmpeg
@@ -146,6 +156,7 @@ jobs:
       - name: Build ffmpeg (audio-only)
         if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
+          pacman --noconfirm -S --needed make diffutils
           git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
             https://git.ffmpeg.org/ffmpeg.git ffmpeg
           cd ffmpeg

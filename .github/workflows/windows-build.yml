@@ -1,0 +1,470 @@
+name: Build Windows
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+env:
+    FFMPEG_VERSION: n7.1
+    MPV_VERSION: v0.39.0
+    LIBPLACEBO_VERSION: v7.349.0
+    LIBASS_VERSION: 0.17.3
+    ZIG_VERSION: 0.13.0
+    BSDIFF_VERSION: 0.1.19
+    ZSTD_VERSION: 0.1.3
+
+jobs:
+    build-deps:
+        runs-on: windows-latest
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
+
+            # ── MSYS2 for ffmpeg + libmpv ─────────────────────────────────
+            - name: Setup MSYS2
+              uses: msys2/setup-msys2@v2
+              with:
+                  msystem: UCRT64
+                  update: true
+                  install: >-
+                      mingw-w64-ucrt-x86_64-gcc
+                      mingw-w64-ucrt-x86_64-meson
+                      mingw-w64-ucrt-x86_64-ninja
+                      mingw-w64-ucrt-x86_64-pkgconf
+                      mingw-w64-ucrt-x86_64-nasm
+                      mingw-w64-ucrt-x86_64-openssl
+                      mingw-w64-ucrt-x86_64-zlib
+                      mingw-w64-ucrt-x86_64-fribidi
+                      mingw-w64-ucrt-x86_64-harfbuzz
+                      make
+                      diffutils
+                      git
+
+            # ── Shared ffmpeg (for electrobun runtime) ───────────────────────
+            - name: Cache shared ffmpeg
+              id: cache-ffmpeg-shared
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/prefix-shared
+                  key: ffmpeg-shared-windows-x86_64-${{ env.FFMPEG_VERSION }}
+
+            - name: Build shared ffmpeg
+              if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
+              run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure \
+                    --prefix=${{ github.workspace }}/prefix-shared \
+                    --arch=x86_64 --target-os=mingw32 \
+                    --enable-shared --disable-static --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice --disable-avfilter --disable-swscale \
+                    --disable-postproc --disable-everything \
+                    --enable-network --enable-zlib \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=mp4,mov,null,wav \
+                    --enable-encoder=aac,pcm_s16le
+                  make -j$(nproc) install
+
+            - name: Stage shared ffmpeg
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
+              run: |
+                  mkdir -p ${{ github.workspace }}/staging-ffmpeg-shared
+                  find "${{ github.workspace }}/prefix-shared" -name "avutil-*.dll" -exec cp {} ${{ github.workspace }}/staging-ffmpeg-shared/ \;
+                  find "${{ github.workspace }}/prefix-shared" -name "avformat-*.dll" -exec cp {} ${{ github.workspace }}/staging-ffmpeg-shared/ \;
+                  find "${{ github.workspace }}/prefix-shared" -name "avcodec-*.dll" -exec cp {} ${{ github.workspace }}/staging-ffmpeg-shared/ \;
+                  find "${{ github.workspace }}/prefix-shared" -name "swresample-*.dll" -exec cp {} ${{ github.workspace }}/staging-ffmpeg-shared/ \;
+                  find "${{ github.workspace }}/prefix-shared" -name "*.pc" -exec cp {} ${{ github.workspace }}/staging-ffmpeg-shared/ \; 2>/dev/null || true
+
+            - name: Upload shared ffmpeg
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-shared-windows-x86_64
+                  path: ${{ github.workspace }}/staging-ffmpeg-shared/*
+
+            # ── Static ffmpeg (for libmpv build) ────────────────────────────
+            - name: Cache static ffmpeg
+              id: cache-ffmpeg-static
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/prefix-static
+                  key: ffmpeg-static-windows-${{ env.FFMPEG_VERSION }}
+
+            - name: Build static ffmpeg
+              if: steps.cache-ffmpeg-static.outputs.cache-hit != 'true'
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
+              run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  pacman --noconfirm -S --needed make diffutils
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
+                  cd ffmpeg-static
+                  ./configure \
+                    --prefix=${{ github.workspace }}/prefix-static \
+                    --enable-static --disable-shared --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice \
+                    --disable-postproc --disable-everything \
+                    --enable-avfilter --enable-swscale \
+                    --enable-network --enable-zlib --enable-openssl \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=null,wav --enable-encoder=pcm_s16le
+                  make -j$(nproc) install
+
+            # ── libplacebo ───────────────────────────────────────────────────
+            - name: Build libplacebo
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
+              run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  PREFIX="$(cygpath -u '${{ github.workspace }}/prefix-static')"
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+                    https://github.com/haasn/libplacebo.git
+                  cd libplacebo
+                  git submodule update --init --depth 1
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix $PREFIX
+                  meson install -C build
+
+            # ── libass ───────────────────────────────────────────────────────
+            - name: Build libass
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
+              run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  PREFIX="$(cygpath -u '${{ github.workspace }}/prefix-static')"
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+                    https://github.com/libass/libass.git
+                  cd libass
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled \
+                    --prefix $PREFIX
+                  meson install -C build
+
+            # ── libmpv ──────────────────────────────────────────────────────
+            - name: Cache libmpv
+              id: cache-libmpv
+              uses: actions/cache@v4
+              with:
+                  path: package/mpv/build
+                  key: libmpv-windows-${{ env.MPV_VERSION }}
+
+            - name: Checkout mpv
+              if: steps.cache-libmpv.outputs.cache-hit != 'true'
+              uses: actions/checkout@v4
+              with:
+                  repository: mpv-player/mpv
+                  ref: ${{ env.MPV_VERSION }}
+                  path: package/mpv
+
+            - name: Build libmpv
+              if: steps.cache-libmpv.outputs.cache-hit != 'true'
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
+              run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  PREFIX="$(cygpath -u '${{ github.workspace }}/prefix-static')"
+                  cd mpv
+                  PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dwasapi=enabled -Dwin32-smtc=disabled \
+                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+                    -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
+                    -Dd3d11=disabled -Ddirect3d=disabled \
+                    -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dcaca=disabled \
+                    -Dmanpage-build=disabled -Dtests=false \
+                    -Dc_args='-ffunction-sections -fdata-sections' \
+                     -Dc_link_args='-Wl,--gc-sections -lstdc++'
+                  meson compile -C build
+                  strip build/libmpv-2.dll
+
+            - name: Upload libmpv
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-windows-x86_64
+                  path: package/mpv/build/libmpv-2.dll
+
+            # ── SMTC + FileDialog + AUMID (MSVC) ──────────────────────────
+            - uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Build smtc.dll
+              shell: cmd
+              run: |
+                  mkdir src\smtc\build 2>nul
+                  cl /nologo /LD /EHsc /std:c++20 /O2 smtc\smtc.cpp ^
+                    /link /out:src\smtc\build\smtc.dll windowsapp.lib
+                  if exist src\smtc\build\smtc.dll echo smtc.dll built
+
+            - name: Build filedialog.dll
+              shell: cmd
+              run: |
+                  cl /nologo /LD /EHsc /std:c++20 /O2 smtc\filedialog.cpp ^
+                    /link /out:src\smtc\build\filedialog.dll ole32.lib shell32.lib
+                  if exist src\smtc\build\filedialog.dll echo filedialog.dll built
+
+            - name: Build aumid.dll
+              shell: cmd
+              run: |
+                  cl /nologo /LD /EHsc /std:c++20 /O2 smtc\aumid.cpp ^
+                    /link /out:src\smtc\build\aumid.dll ole32.lib shell32.lib
+                  if exist src\smtc\build\aumid.dll echo aumid.dll built
+
+            - name: Upload smtc
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-windows-x86_64
+                  path: |
+                      package/src/smtc/build/smtc.dll
+                      package/src/smtc/build/smtc.lib
+                      package/src/smtc/build/smtc.exp
+                      package/src/smtc/build/filedialog.dll
+                      package/src/smtc/build/filedialog.lib
+                      package/src/smtc/build/filedialog.exp
+                      package/src/smtc/build/aumid.dll
+                      package/src/smtc/build/aumid.lib
+                      package/src/smtc/build/aumid.exp
+
+    build-electrobun:
+        needs: build-deps
+        runs-on: windows-latest
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Download artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: ${{ github.workspace }}/artifacts
+
+            - name: Place downloaded artifacts
+              run: |
+                  mkdir -Force src\mpv src\smtc\build ffmpeg
+                  Copy-Item "${{ github.workspace }}\artifacts\libmpv-windows-x86_64\libmpv-2.dll" src\mpv\libmpv.dll -ErrorAction SilentlyContinue
+                  Copy-Item "${{ github.workspace }}\artifacts\smtc-windows-x86_64\*.dll" src\smtc\build\ -ErrorAction SilentlyContinue
+                  Copy-Item "${{ github.workspace }}\artifacts\smtc-windows-x86_64\*.lib" src\smtc\build\ -ErrorAction SilentlyContinue
+                  Copy-Item "${{ github.workspace }}\artifacts\smtc-windows-x86_64\*.exp" src\smtc\build\ -ErrorAction SilentlyContinue
+
+            # ── Bun ─────────────────────────────────────────────────────────
+            - name: Cache Bun
+              uses: actions/cache@v4
+              with:
+                  path: ~\.bun\install\cache
+                  key: windows-bun-${{ hashFiles('package/bun.lock', 'package/package.json') }}
+                  restore-keys: windows-bun-
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - run: bun install
+
+            # ── Vendor Zig ──────────────────────────────────────────────────
+            - name: Cache Zig
+              id: cache-zig
+              uses: actions/cache@v4
+              with:
+                  path: vendors\zig
+                  key: windows-zig-${{ env.ZIG_VERSION }}
+
+            - name: Download Zig
+              if: steps.cache-zig.outputs.cache-hit != 'true'
+              run: |
+                  Remove-Item -Recurse -Force vendors\zig -ErrorAction SilentlyContinue
+                  New-Item -ItemType Directory -Force -Path vendors\zig
+                  curl.exe -L "https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-windows-x86_64-${{ env.ZIG_VERSION }}.zip" -o vendors\zig.zip
+                  Expand-Archive -Path vendors\zig.zip -DestinationPath vendors\zig-temp -Force
+                  Copy-Item "vendors\zig-temp\zig-windows-x86_64-${{ env.ZIG_VERSION }}\zig.exe" vendors\zig\
+                  Copy-Item "vendors\zig-temp\zig-windows-x86_64-${{ env.ZIG_VERSION }}\lib" vendors\zig\ -Recurse
+                  Remove-Item -Recurse -Force vendors\zig.zip, vendors\zig-temp
+
+            # ── Vendor zig-bsdiff ──────────────────────────────────────────
+            - name: Cache zig-bsdiff
+              id: cache-bsdiff
+              uses: actions/cache@v4
+              with:
+                  path: vendors\zig-bsdiff
+                  key: windows-bsdiff-${{ env.BSDIFF_VERSION }}
+
+            - name: Download zig-bsdiff
+              if: steps.cache-bsdiff.outputs.cache-hit != 'true'
+              run: |
+                  Remove-Item -Recurse -Force vendors\zig-bsdiff -ErrorAction SilentlyContinue
+                  New-Item -ItemType Directory -Force -Path vendors\zig-bsdiff
+                  curl.exe -L "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${{ env.BSDIFF_VERSION }}/zig-bsdiff-win32-x86_64.tar.gz" -o vendors\bsdiff.tar.gz
+                  tar -xzf vendors\bsdiff.tar.gz -C vendors\zig-bsdiff
+                  Remove-Item vendors\bsdiff.tar.gz
+
+            # ── Vendor zig-zstd ────────────────────────────────────────────
+            - name: Cache zig-zstd
+              id: cache-zstd
+              uses: actions/cache@v4
+              with:
+                  path: vendors\zig-zstd
+                  key: windows-zstd-${{ env.ZSTD_VERSION }}
+
+            - name: Download zig-zstd
+              if: steps.cache-zstd.outputs.cache-hit != 'true'
+              run: |
+                  Remove-Item -Recurse -Force vendors\zig-zstd -ErrorAction SilentlyContinue
+                  New-Item -ItemType Directory -Force -Path vendors\zig-zstd
+                  curl.exe -fL -H "Accept: application/octet-stream" "https://github.com/blackboardsh/zig-zstd/releases/download/v${{ env.ZSTD_VERSION }}/zig-zstd-win32-x86_64.tar.gz" -o vendors\zstd.tar.gz
+                  tar -xzf vendors\zstd.tar.gz -C vendors\zig-zstd
+                  Remove-Item vendors\zstd.tar.gz
+
+            # ── Vendor WebView2 ───────────────────────────────────────────
+            - name: Cache WebView2
+              id: cache-webview2
+              uses: actions/cache@v4
+              with:
+                  path: vendors\webview2
+                  key: windows-webview2
+
+            - name: NuGet restore WebView2
+              if: steps.cache-webview2.outputs.cache-hit != 'true'
+              run: |
+                  New-Item -ItemType Directory -Force -Path vendors\webview2
+                  nuget install Microsoft.Web.WebView2 -OutputDirectory vendors\webview2 -Source https://api.nuget.org/v3/index.json
+                  $dir = Get-ChildItem -Path vendors\webview2 -Directory | Where-Object { $_.Name -like "Microsoft.Web.WebView2*" -and $_.Name -ne "Microsoft.Web.WebView2" } | Select-Object -First 1
+                  if ($dir) {
+                      Remove-Item -Recurse -Force "vendors\webview2\Microsoft.Web.WebView2" -ErrorAction SilentlyContinue
+                      Rename-Item $dir.FullName "vendors\webview2\Microsoft.Web.WebView2"
+                  }
+
+            # ── MSVC for native wrapper ───────────────────────────────────-
+            - uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Build native wrapper
+              shell: cmd
+              run: |
+                  mkdir src\native\win\build 2>nul
+                  mkdir src\native\build 2>nul
+                  cl /c /EHsc /std:c++20 /DNOMINMAX /MT ^
+                    /I"vendors\webview2\Microsoft.Web.WebView2\build\native\include" ^
+                    /D_USRDLL /D_WINDLL ^
+                    /Fosrc\native\win\build\nativeWrapper.obj ^
+                    src\native\win\nativeWrapper.cpp
+                  link /DLL /OUT:src\native\build\libNativeWrapper.dll ^
+                    user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib ^
+                    dcomp.lib d2d1.lib kernel32.lib comctl32.lib ^
+                    "vendors\webview2\Microsoft.Web.WebView2\build\native\x64\WebView2LoaderStatic.lib" ^
+                    libcmt.lib ^
+                    /IMPLIB:src\native\build\libNativeWrapper.lib ^
+                    src\native\win\build\nativeWrapper.obj
+                  echo native wrapper built
+
+            # ── Build launcher (Zig) ───────────────────────────────────────
+            - name: Build launcher
+              run: |
+                  Set-Location src\launcher
+                  ..\..\vendors\zig\zig build -Doptimize=ReleaseSmall -Dtarget=x86_64-windows -Dcpu=baseline
+
+            # ── Build main.js ──────────────────────────────────────────────
+            - name: Build main.js
+              run: bun build src/launcher/main.ts --outdir dist --target bun
+
+            # ── Build preload ─────────────────────────────────────────────-
+            - name: Build preload
+              run: bun src/bun/preload/build.ts
+
+            # ── Build CLI ──────────────────────────────────────────────────
+            - name: Build CLI
+              run: |
+                  Remove-Item -Recurse -Force src\cli\build -ErrorAction SilentlyContinue
+                  New-Item -ItemType Directory -Force -Path src\cli\build
+                  bun build src/cli/index.ts --compile --target=bun-windows-x64-baseline --outfile src/cli/build/electrobun
+
+            # ── Copy to dist ───────────────────────────────────────────────
+            - name: Copy to dist
+              shell: pwsh
+              run: |
+                  Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+                  New-Item -ItemType Directory -Force -Path dist\api\bun, dist\api\browser
+
+                  $bunPath = (Get-Command bun).Source
+                  Copy-Item $bunPath dist\bun.exe
+                  Copy-Item src\launcher\zig-out\bin\launcher.exe dist\launcher.exe
+                  Copy-Item vendors\zig-bsdiff\bsdiff.exe dist\bsdiff.exe
+                  Copy-Item vendors\zig-bsdiff\bspatch.exe dist\bspatch.exe
+                  Copy-Item vendors\zig-zstd\zig-zstd.exe dist\zig-zstd.exe
+                  Copy-Item src\npmbin\index.js dist\npmbin.js
+                  Copy-Item src\cli\build\electrobun.exe dist\electrobun.exe
+
+                  if (Test-Path src\native\build\libNativeWrapper.dll) { Copy-Item src\native\build\libNativeWrapper.dll dist\ }
+                  if (Test-Path src\native\build\libNativeWrapper.lib) { Copy-Item src\native\build\libNativeWrapper.lib dist\ }
+                  $webview2Loader = "vendors\webview2\Microsoft.Web.WebView2\build\native\x64\WebView2Loader.dll"
+                  if (Test-Path $webview2Loader) { Copy-Item $webview2Loader dist\ }
+
+                  if (Test-Path src\smtc\build\smtc.dll) { Copy-Item src\smtc\build\smtc.dll dist\ }
+                  if (Test-Path src\smtc\build\aumid.dll) { Copy-Item src\smtc\build\aumid.dll dist\ }
+                  if (Test-Path src\smtc\build\filedialog.dll) { Copy-Item src\smtc\build\filedialog.dll dist\ }
+
+                  Copy-Item ffmpeg\avformat-62.dll dist\
+                  Copy-Item ffmpeg\avcodec-62.dll dist\
+                  Copy-Item ffmpeg\avutil-60.dll dist\
+                  Copy-Item ffmpeg\libssp-0.dll dist\
+                  Copy-Item ffmpeg\swresample-6.dll dist\
+
+                  if (Test-Path src\mpv\libmpv.dll) { Copy-Item src\mpv\libmpv.dll dist\ }
+                  if (Test-Path src\mpv\mpv.exe) { Copy-Item src\mpv\mpv.exe dist\ }
+
+                  Copy-Item -Recurse src\bun\* dist\api\bun\
+                  Copy-Item -Recurse src\browser\* dist\api\browser\
+                  Copy-Item -Recurse src\shared\* dist\api\shared\
+
+                  New-Item -ItemType Directory -Force -Path bin
+                  Copy-Item src\cli\build\electrobun.exe bin\electrobun.exe
+                  Write-Output "dist/ populated"
+
+            # ── Create platform dist folder ────────────────────────────────-
+            - name: Create platform dist folder
+              shell: pwsh
+              run: |
+                  Remove-Item -Recurse -Force dist-win-x64 -ErrorAction SilentlyContinue
+                  New-Item -ItemType Directory -Force -Path dist-win-x64
+                  Copy-Item -Recurse dist\* dist-win-x64\
+                  Write-Output "dist-win-x64 created"
+
+            - name: Upload final artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: dist-win-x64
+                  path: package\dist-win-x64

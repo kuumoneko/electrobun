@@ -1,0 +1,441 @@
+name: Build macOS
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+env:
+    FFMPEG_VERSION: n7.1
+    MPV_VERSION: v0.39.0
+    LIBPLACEBO_VERSION: v7.349.0
+    LIBASS_VERSION: 0.17.3
+    ZIG_VERSION: 0.13.0
+    BSDIFF_VERSION: 0.1.19
+    ZSTD_VERSION: 0.1.3
+    ASAR_VERSION: 0.2.2
+    ARCH: ${{ (runner.arch == 'ARM64' && 'aarch64') || 'x86_64' }}
+
+jobs:
+    build-deps:
+        runs-on: macos-latest
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install system deps
+              run: |
+                  brew update
+                  brew install meson ninja pkg-config nasm \
+                    openssl@3 zlib curl vulkan-headers \
+                    fribidi harfbuzz
+                  pip3 install --break-system-packages jinja2
+
+            # ── Shared ffmpeg (for electrobun runtime) ───────────────────────
+            - name: Cache shared ffmpeg
+              id: cache-ffmpeg-shared
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/prefix-shared
+                  key: ffmpeg-shared-macos-${{ env.ARCH }}-${{ env.FFMPEG_VERSION }}
+
+            - name: Build shared ffmpeg
+              if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch $FFMPEG_VERSION \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                  cd ffmpeg
+                  export PKG_CONFIG_PATH="$(brew --prefix zlib)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH"
+                  ./configure \
+                    --prefix=${{ github.workspace }}/prefix-shared \
+                    --enable-shared --disable-static --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice --disable-avfilter --disable-swscale \
+                    --disable-postproc --disable-everything \
+                    --enable-network --enable-zlib \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=mp4,mov,null,wav \
+                    --enable-encoder=aac,pcm_s16le
+                  make -j$(sysctl -n hw.logicalcpu) install
+
+            - name: Stage shared ffmpeg
+              run: |
+                  mkdir -p ${{ github.workspace }}/staging-ffmpeg-shared
+                  cp ${{ github.workspace }}/prefix-shared/lib/libavutil*.dylib ${{ github.workspace }}/staging-ffmpeg-shared/
+                  cp ${{ github.workspace }}/prefix-shared/lib/libavformat*.dylib ${{ github.workspace }}/staging-ffmpeg-shared/
+                  cp ${{ github.workspace }}/prefix-shared/lib/libavcodec*.dylib ${{ github.workspace }}/staging-ffmpeg-shared/
+                  cp ${{ github.workspace }}/prefix-shared/lib/libswresample*.dylib ${{ github.workspace }}/staging-ffmpeg-shared/
+                  cp ${{ github.workspace }}/prefix-shared/lib/pkgconfig/*.pc ${{ github.workspace }}/staging-ffmpeg-shared/
+
+            - name: Upload shared ffmpeg
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-shared-macos-${{ env.ARCH }}
+                  path: ${{ github.workspace }}/staging-ffmpeg-shared/*
+
+            # ── Static ffmpeg (for libmpv build) ────────────────────────────
+            - name: Cache static ffmpeg
+              id: cache-ffmpeg-static
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/prefix-static
+                  key: ffmpeg-static-macos-${{ env.ARCH }}-${{ env.FFMPEG_VERSION }}
+
+            - name: Build static ffmpeg
+              if: steps.cache-ffmpeg-static.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch $FFMPEG_VERSION \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
+                  cd ffmpeg-static
+                  export PKG_CONFIG_PATH="$(brew --prefix zlib)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH"
+                  ./configure \
+                    --prefix=${{ github.workspace }}/prefix-static \
+                    --enable-static --disable-shared --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice \
+                    --disable-postproc --disable-everything \
+                    --enable-avfilter --enable-swscale \
+                    --enable-network --enable-zlib --enable-openssl \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=null,wav --enable-encoder=pcm_s16le
+                  make -j$(sysctl -n hw.logicalcpu) install
+
+            # ── libplacebo ───────────────────────────────────────────────────
+            - name: Build libplacebo
+              run: |
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+                    https://github.com/haasn/libplacebo.git
+                  cd libplacebo
+                  git submodule update --init --depth 1
+                  PKG_CONFIG_PATH="${{ github.workspace }}/prefix-static/lib/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix ${{ github.workspace }}/prefix-static
+                  meson install -C build
+
+            # ── libass ───────────────────────────────────────────────────────
+            - name: Build libass
+              run: |
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+                    https://github.com/libass/libass.git
+                  cd libass
+                  PKG_CONFIG_PATH="${{ github.workspace }}/prefix-static/lib/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled \
+                    --prefix ${{ github.workspace }}/prefix-static
+                  meson install -C build
+
+            # ── libmpv ──────────────────────────────────────────────────────
+            - name: Cache libmpv
+              id: cache-libmpv
+              uses: actions/cache@v4
+              with:
+                  path: package/mpv/build
+                  key: libmpv-macos-${{ env.ARCH }}-${{ env.MPV_VERSION }}
+
+            - name: Checkout mpv
+              if: steps.cache-libmpv.outputs.cache-hit != 'true'
+              uses: actions/checkout@v4
+              with:
+                  repository: mpv-player/mpv
+                  ref: ${{ env.MPV_VERSION }}
+                  path: package/mpv
+
+            - name: Build libmpv
+              if: steps.cache-libmpv.outputs.cache-hit != 'true'
+              run: |
+                  cd mpv
+                  PKG_CONFIG_PATH=${{ github.workspace }}/prefix-static/lib/pkgconfig \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dcoreaudio=enabled \
+                    -Dcocoa=disabled -Dswift-build=disabled \
+                    -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
+                    -Dmacos-touchbar=disabled \
+                    -Dgl=disabled -Dvulkan=disabled \
+                    -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled \
+                    -Dios-gl=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dcaca=disabled \
+                    -Dalsa=disabled -Dpulse=disabled -Dpipewire=disabled \
+                    -Djack=disabled -Dopenal=disabled \
+                    -Dsdl2-video=disabled -Dsdl2-audio=disabled \
+                    -Dmanpage-build=disabled -Dtests=false \
+                    -Dc_args='-ffunction-sections -fdata-sections' \
+                     -Dc_link_args='-Wl,-dead_strip'
+                  meson compile -C build
+                  strip -S build/libmpv.dylib
+
+            - name: Upload libmpv
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-macos-${{ env.ARCH }}
+                  path: package/mpv/build/libmpv.dylib
+
+            # ── SMTC + FileDialog ───────────────────────────────────────────
+            - name: Build libsmtc.dylib
+              run: |
+                  clang++ -shared -fPIC -o libsmtc.dylib \
+                    src/smtc/macos/smtc.mm \
+                    -framework MediaPlayer -framework AppKit -framework Cocoa \
+                    -std=c++20 -O2 -ObjC++
+                  strip -S libsmtc.dylib
+
+            - name: Build libfiledialog.dylib
+              run: |
+                  clang++ -shared -fPIC -o libfiledialog.dylib \
+                    src/smtc/macos/filedialog.mm \
+                    -framework AppKit -framework Cocoa \
+                    -std=c++20 -O2 -ObjC++
+                  strip -S libfiledialog.dylib
+
+            - name: Upload smtc
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-macos-${{ env.ARCH }}
+                  path: |
+                      libsmtc.dylib
+                      libfiledialog.dylib
+
+    build-electrobun:
+        needs: build-deps
+        runs-on: macos-latest
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Download artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: ${{ github.workspace }}/artifacts
+
+            - name: Place downloaded artifacts
+              run: |
+                  mkdir -p src/mpv src/smtc/build
+                  cp ${{ github.workspace }}/artifacts/libmpv-macos-${{ env.ARCH }}/libmpv.dylib src/mpv/ 2>/dev/null || true
+                  cp ${{ github.workspace }}/artifacts/smtc-macos-${{ env.ARCH }}/libsmtc.dylib src/smtc/build/ 2>/dev/null || true
+                  cp ${{ github.workspace }}/artifacts/smtc-macos-${{ env.ARCH }}/libfiledialog.dylib src/smtc/build/ 2>/dev/null || true
+
+            # ── System deps for electrobun build ───────────────────────────
+            - name: Install build deps
+              run: |
+                  brew update
+                  brew install cmake pkg-config
+
+            # ── Bun ─────────────────────────────────────────────────────────
+            - name: Cache Bun
+              uses: actions/cache@v4
+              with:
+                  path: ~/.bun/install/cache
+                  key: macos-bun-${{ hashFiles('package/bun.lock', 'package/package.json') }}
+                  restore-keys: macos-bun-
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - run: bun install
+
+            # ── Vendor Zig ──────────────────────────────────────────────────
+            - name: Cache Zig
+              id: cache-zig
+              uses: actions/cache@v4
+              with:
+                  path: vendors/zig
+                  key: macos-zig-${{ env.ZIG_VERSION }}
+
+            - name: Download Zig
+              if: steps.cache-zig.outputs.cache-hit != 'true'
+              run: |
+                  rm -rf vendors/zig
+                  mkdir -p vendors/zig
+                  if [ "${{ env.ARCH }}" = "aarch64" ]; then
+                    ZIG_ARCH="aarch64"
+                  else
+                    ZIG_ARCH="x86_64"
+                  fi
+                  curl -L "https://ziglang.org/download/${{ env.ZIG_VERSION }}/zig-macos-${ZIG_ARCH}-${{ env.ZIG_VERSION }}.tar.xz" \
+                    | tar -xJ --strip-components=1 -C vendors/zig \
+                      zig-macos-${ZIG_ARCH}-${{ env.ZIG_VERSION }}/zig \
+                      zig-macos-${ZIG_ARCH}-${{ env.ZIG_VERSION }}/lib \
+                      zig-macos-${ZIG_ARCH}-${{ env.ZIG_VERSION }}/doc
+
+            # ── Vendor zig-bsdiff ──────────────────────────────────────────
+            - name: Cache zig-bsdiff
+              id: cache-bsdiff
+              uses: actions/cache@v4
+              with:
+                  path: vendors/zig-bsdiff
+                  key: macos-bsdiff-${{ env.BSDIFF_VERSION }}
+
+            - name: Download zig-bsdiff
+              if: steps.cache-bsdiff.outputs.cache-hit != 'true'
+              run: |
+                  rm -rf vendors/zig-bsdiff
+                  mkdir -p vendors/zig-bsdiff
+                  BSDIFF_PLATFORM="darwin"
+                  curl -L "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${{ env.BSDIFF_VERSION }}/zig-bsdiff-${BSDIFF_PLATFORM}-${{ env.ARCH }}.tar.gz" \
+                    -o /tmp/bsdiff.tar.gz
+                  tar -xzf /tmp/bsdiff.tar.gz -C vendors/zig-bsdiff
+                  chmod +x vendors/zig-bsdiff/bsdiff vendors/zig-bsdiff/bspatch
+                  rm /tmp/bsdiff.tar.gz
+
+            # ── Vendor zig-zstd ────────────────────────────────────────────
+            - name: Cache zig-zstd
+              id: cache-zstd
+              uses: actions/cache@v4
+              with:
+                  path: vendors/zig-zstd
+                  key: macos-zstd-${{ env.ZSTD_VERSION }}
+
+            - name: Download zig-zstd
+              if: steps.cache-zstd.outputs.cache-hit != 'true'
+              run: |
+                  rm -rf vendors/zig-zstd
+                  mkdir -p vendors/zig-zstd
+                  ZSTD_PLATFORM="darwin"
+                  curl -fL -H "Accept: application/octet-stream" \
+                    "https://github.com/blackboardsh/zig-zstd/releases/download/v${{ env.ZSTD_VERSION }}/zig-zstd-${ZSTD_PLATFORM}-${{ env.ARCH }}.tar.gz" \
+                    -o /tmp/zstd.tar.gz
+                  tar -xzf /tmp/zstd.tar.gz -C vendors/zig-zstd
+                  chmod +x vendors/zig-zstd/zig-zstd
+                  rm /tmp/zstd.tar.gz
+
+            # ── Vendor zig-asar ────────────────────────────────────────────
+            - name: Cache zig-asar
+              id: cache-asar
+              uses: actions/cache@v4
+              with:
+                  path: vendors/zig-asar
+                  key: macos-asar-${{ env.ASAR_VERSION }}
+
+            - name: Download zig-asar
+              if: steps.cache-asar.outputs.cache-hit != 'true'
+              run: |
+                  rm -rf vendors/zig-asar
+                  mkdir -p vendors/zig-asar
+                  ASAR_PLATFORM="darwin"
+                  curl -L "https://github.com/blackboardsh/zig-asar/releases/download/v${{ env.ASAR_VERSION }}/zig-asar-${ASAR_PLATFORM}-${{ env.ARCH }}.tar.gz" \
+                    -o /tmp/asar.tar.gz
+                  tar -xzf /tmp/asar.tar.gz -C vendors/zig-asar
+                  chmod +x vendors/zig-asar/libasar.dylib 2>/dev/null || true
+                  rm /tmp/asar.tar.gz
+
+            # ── Build native wrapper ───────────────────────────────────────-
+            - name: Build native wrapper
+              run: |
+                  mkdir -p src/native/macos/build src/native/build
+                  clang++ -c src/native/macos/nativeWrapper.mm \
+                    -o src/native/macos/build/nativeWrapper.o \
+                    -fobjc-arc -fno-objc-msgsend-selector-stubs \
+                    -std=c++20
+                  clang++ -o src/native/build/libNativeWrapper.dylib \
+                    src/native/macos/build/nativeWrapper.o \
+                    vendors/zig-asar/libasar.dylib \
+                    -framework Cocoa -framework WebKit \
+                    -framework QuartzCore -framework Metal \
+                    -framework MetalKit -framework UserNotifications \
+                    -stdlib=libc++ -shared \
+                    -install_name @executable_path/libNativeWrapper.dylib \
+                    -Wl,-rpath,@executable_path
+                  echo "✓ macOS native wrapper built"
+
+            # ── Build launcher (Zig) ───────────────────────────────────────
+            - name: Build launcher
+              run: |
+                  cd src/launcher
+                  if [ "${{ env.ARCH }}" = "aarch64" ]; then
+                    ZIG_TARGET="-Dtarget=aarch64-macos"
+                  else
+                    ZIG_TARGET="-Dtarget=x86_64-macos"
+                  fi
+                  ../../vendors/zig/zig build -Doptimize=ReleaseSmall $ZIG_TARGET
+
+            # ── Build main.js ──────────────────────────────────────────────
+            - name: Build main.js
+              run: bun build src/launcher/main.ts --outdir dist --target bun
+
+            # ── Build preload ─────────────────────────────────────────────-
+            - name: Build preload
+              run: bun src/bun/preload/build.ts
+
+            # ── Build CLI ──────────────────────────────────────────────────
+            - name: Build CLI
+              run: |
+                  rm -rf src/cli/build
+                  mkdir -p src/cli/build
+                  bun build src/cli/index.ts --compile \
+                    --outfile src/cli/build/electrobun
+
+            # ── Copy to dist ───────────────────────────────────────────────
+            - name: Copy to dist
+              run: |
+                  rm -rf dist
+                  mkdir -p dist/api/bun dist/api/browser
+
+                  cp $(which bun) dist/bun
+                  cp src/launcher/zig-out/bin/launcher dist/launcher
+                  cp vendors/zig-bsdiff/bsdiff dist/bsdiff
+                  cp vendors/zig-bsdiff/bspatch dist/bspatch
+                  cp vendors/zig-zstd/zig-zstd dist/zig-zstd
+                  cp src/npmbin/index.js dist/npmbin.js
+                  cp src/cli/build/electrobun dist/electrobun
+
+                  if [ -f src/native/build/libNativeWrapper.dylib ]; then
+                      cp src/native/build/libNativeWrapper.dylib dist/libNativeWrapper.dylib
+                  fi
+                  if [ -f vendors/zig-asar/libasar.dylib ]; then
+                      cp vendors/zig-asar/libasar.dylib dist/libasar.dylib
+                  fi
+
+                  cp -R src/bun dist/api/
+                  cp -R src/browser dist/api/
+                  cp -R src/shared dist/api/
+
+                  if [ -f src/smtc/build/libsmtc.dylib ]; then
+                      cp src/smtc/build/libsmtc.dylib dist/libsmtc.dylib
+                  fi
+                  if [ -f src/smtc/build/libfiledialog.dylib ]; then
+                      cp src/smtc/build/libfiledialog.dylib dist/libfiledialog.dylib
+                  fi
+
+                  mkdir -p bin
+                  cp src/cli/build/electrobun bin/electrobun
+                  echo "✓ dist/ populated"
+
+            # ── Create platform dist folder ────────────────────────────────-
+            - name: Create platform dist folder
+              run: |
+                  PLATFORM_DIR="dist-macos-${{ env.ARCH }}"
+                  rm -rf "$PLATFORM_DIR"
+                  mkdir -p "$PLATFORM_DIR"
+                  cp -r dist/* "$PLATFORM_DIR/"
+                  echo "✓ $PLATFORM_DIR created"
+
+            - name: Upload final artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: dist-macos-${{ env.ARCH }}
+                  path: package/dist-macos-*

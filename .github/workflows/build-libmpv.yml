@@ -64,6 +64,7 @@ jobs:
           git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
             https://github.com/haasn/libplacebo.git
           cd libplacebo
+          git submodule update --init --depth 1
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
             -Ddemos=false -Dtests=false -Dbench=false \
@@ -103,7 +104,7 @@ jobs:
             -Doss-audio=disabled -Dsndio=disabled -Dopenal=disabled \
             -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled \
             -Dcaca=disabled -Dsixel=disabled \
-            -Dmanpage-build=disabled -Dtests=disabled \
+            -Dmanpage-build=disabled -Dtests=false \
             -Dc_args='-ffunction-sections -fdata-sections' \
             -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed'
           meson compile -C build
@@ -145,6 +146,9 @@ jobs:
             mingw-w64-ucrt-x86_64-openssl
             mingw-w64-ucrt-x86_64-zlib
 
+      - name: Install git
+        run: pacman --noconfirm -S --needed git
+
       - name: Cache ffmpeg
         id: cache-ffmpeg
         uses: actions/cache@v4
@@ -179,6 +183,7 @@ jobs:
           git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
             https://github.com/haasn/libplacebo.git
           cd libplacebo
+          git submodule update --init --depth 1
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
             -Ddemos=false -Dtests=false -Dbench=false \
@@ -216,7 +221,7 @@ jobs:
             -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
             -Diconv=disabled -Dzlib=disabled \
             -Dcaca=disabled \
-            -Dmanpage-build=disabled -Dtests=disabled \
+            -Dmanpage-build=disabled -Dtests=false \
             -Dc_args='-ffunction-sections -fdata-sections' \
             -Dc_link_args='-Wl,--gc-sections'
           meson compile -C build
@@ -280,6 +285,7 @@ jobs:
           git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
             https://github.com/haasn/libplacebo.git
           cd libplacebo
+          git submodule update --init --depth 1
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
             -Ddemos=false -Dtests=false -Dbench=false \
@@ -322,7 +328,7 @@ jobs:
             -Dalsa=disabled -Dpulse=disabled -Dpipewire=disabled \
             -Djack=disabled -Dopenal=disabled \
             -Dsdl2-video=disabled -Dsdl2-audio=disabled \
-            -Dmanpage-build=disabled -Dtests=disabled \
+            -Dmanpage-build=disabled -Dtests=false \
             -Dc_args='-ffunction-sections -fdata-sections' \
             -Dc_link_args='-Wl,-dead_strip'
           meson compile -C build

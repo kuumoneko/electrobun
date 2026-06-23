@@ -80,19 +80,19 @@ function getPlatformPaths(
 		NATIVE_WRAPPER_MACOS: join(platformDistDir, "libNativeWrapper.dylib"),
 		NATIVE_WRAPPER_WIN: join(platformDistDir, "libNativeWrapper.dll"),
 		NATIVE_WRAPPER_LINUX: join(platformDistDir, "libNativeWrapper.so"),
-    WEBVIEW2LOADER_WIN: join(platformDistDir, "WebView2Loader.dll"),
-    LIBMPV: join(platformDistDir, "libmpv.dll"),
-    // MPV: join(platformDistDir, "mpv") + binExt,
-    // TEST: join(platformDistDir, "test.dll"),
-        SMTC: join(platformDistDir, "smtc.dll"),
+		WEBVIEW2LOADER_WIN: join(platformDistDir, "WebView2Loader.dll"),
+		LIBMPV: join(platformDistDir, "libmpv.dll"),
+		// MPV: join(platformDistDir, "mpv") + binExt,
+		// TEST: join(platformDistDir, "test.dll"),
+		SMTC: join(platformDistDir, "smtc.dll"),
 
-        AVFORMAT: join(platformDistDir, "avformat-62.dll"),
-        AVCODEC: join(platformDistDir, "avcodec-62.dll"),
-        AVUTIL: join(platformDistDir, "avutil-60.dll"),
-        LIBSSP: join(platformDistDir, "libssp-0.dll"),
-        SWREXAMPLE: join(platformDistDir, "swresample-6.dll"),
-        AUMID: join(platformDistDir, "aumid.dll"),
-        FILE_DIALOG: join(platformDistDir, "filedialog.dll"),
+		AVFORMAT: join(platformDistDir, "avformat-62.dll"),
+		AVCODEC: join(platformDistDir, "avcodec-62.dll"),
+		AVUTIL: join(platformDistDir, "avutil-60.dll"),
+		LIBSSP: join(platformDistDir, "libssp-0.dll"),
+		SWREXAMPLE: join(platformDistDir, "swresample-6.dll"),
+		AUMID: join(platformDistDir, "aumid.dll"),
+		FILE_DIALOG: join(platformDistDir, "filedialog.dll"),
 		BSPATCH: join(platformDistDir, "bspatch") + binExt,
 		EXTRACTOR: join(platformDistDir, "extractor") + binExt,
 		BSDIFF: join(platformDistDir, "bsdiff") + binExt,
@@ -259,7 +259,7 @@ const defaultConfig = {
 			codesign: false,
 			createDmg: true,
 			notarize: false,
-				bundleWGPU: false,
+			bundleWGPU: false,
 			entitlements: {
 				// This entitlement is required for Electrobun apps with a hardened runtime (required for notarization) to run on macos
 				"com.apple.security.cs.allow-jit": true,
@@ -493,8 +493,8 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 		);
 		// mpv binary
 		// const mpvlibSource = targetPaths.MPV;
-  //   const mpvlibDestination = join(appBundleMacOSPath, "mpv") + targetBinExt;
-    // libmpv binary
+		//   const mpvlibDestination = join(appBundleMacOSPath, "mpv") + targetBinExt;
+		// libmpv binary
 		const libmpvSource = targetPaths.LIBMPV;
 		const libmpvDestination = join(appBundleMacOSPath, "libmpv.dll");
 
@@ -505,31 +505,31 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 		const bsPatchDestFolder = dirname(bsPatchDestination);
 		// zig-zstd binary
 		const zstdSource = targetPaths.ZSTD;
-    const zstdDestination = join(appBundleMacOSPath, "zig-zstd") + targetBinExt;
+		const zstdDestination = join(appBundleMacOSPath, "zig-zstd") + targetBinExt;
 
-    const avformatSource = targetPaths.AVFORMAT;
-        const avformatDestination = join(appBundleMacOSPath, "avformat-62.dll");
+		const avformatSource = targetPaths.AVFORMAT;
+		const avformatDestination = join(appBundleMacOSPath, "avformat-62.dll");
 
-    const avcodecSource = targetPaths.AVCODEC;
-        const avcodecDestination = join(appBundleMacOSPath, "avcodec-62.dll");
+		const avcodecSource = targetPaths.AVCODEC;
+		const avcodecDestination = join(appBundleMacOSPath, "avcodec-62.dll");
 
-        const avutilSource = targetPaths.AVUTIL;
-        const avutilDestination = join(appBundleMacOSPath, "avutil-60.dll");
+		const avutilSource = targetPaths.AVUTIL;
+		const avutilDestination = join(appBundleMacOSPath, "avutil-60.dll");
 
-        const libsspSource = targetPaths.LIBSSP;
-        const libsspDestination = join(appBundleMacOSPath, "libssp-0.dll");
+		const libsspSource = targetPaths.LIBSSP;
+		const libsspDestination = join(appBundleMacOSPath, "libssp-0.dll");
 
-        const swresampleSource = targetPaths.SWREXAMPLE;
-        const swresampleDestination = join(appBundleMacOSPath, "swresample-6.dll");
+		const swresampleSource = targetPaths.SWREXAMPLE;
+		const swresampleDestination = join(appBundleMacOSPath, "swresample-6.dll");
 
-    const smtcSource = targetPaths.SMTC;
-    const smtcDestination = join(appBundleMacOSPath, "smtc.dll");
+		const smtcSource = targetPaths.SMTC;
+		const smtcDestination = join(appBundleMacOSPath, "smtc.dll");
 
-    const aumidSource = targetPaths.AUMID;
-        const aumidDestination = join(appBundleMacOSPath, "aumid.dll");
+		const aumidSource = targetPaths.AUMID;
+		const aumidDestination = join(appBundleMacOSPath, "aumid.dll");
 
-        const fileDialogSource = targetPaths.FILE_DIALOG;
-        const fileDialogDestination = join(appBundleMacOSPath, "file_dialog.dll");
+		const fileDialogSource = targetPaths.FILE_DIALOG;
+		const fileDialogDestination = join(appBundleMacOSPath, "file_dialog.dll");
 
 		// Generate URL scheme handlers
 		const urlTypes = generateURLTypes(
@@ -590,28 +590,28 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 			Bun.write(join(appBundleFolderResourcesPath, "main.js"), Bun.file(targetPaths.MAIN_JS), { createPath: true }),
 			Bun.write(nativeWrapperMacosDestination, Bun.file(nativeWrapperMacosSource)),
 			Bun.write(webview2LibDestination, Bun.file(webview2LibSource)),
-      // Bun.write(mpvlibDestination, Bun.file(mpvlibSource)),
+			// Bun.write(mpvlibDestination, Bun.file(mpvlibSource)),
 			Bun.write(libmpvDestination, Bun.file(libmpvSource)),
 			Bun.write(bsPatchDestination, Bun.file(bsPatchSource)),
-      Bun.write(zstdDestination, Bun.file(zstdSource)),
-      // Bun.write(testDestination, Bun.file(testSource)),
-            Bun.write(smtcDestination, Bun.file(smtcSource)),
-      Bun.write(fileDialogDestination, Bun.file(fileDialogSource)),
-            Bun.write(aumidDestination, Bun.file(aumidSource)),
+			Bun.write(zstdDestination, Bun.file(zstdSource)),
+			// Bun.write(testDestination, Bun.file(testSource)),
+			Bun.write(smtcDestination, Bun.file(smtcSource)),
+			Bun.write(fileDialogDestination, Bun.file(fileDialogSource)),
+			Bun.write(aumidDestination, Bun.file(aumidSource)),
 			Bun.write(avformatDestination, Bun.file(avformatSource)),
 			Bun.write(avcodecDestination, Bun.file(avcodecSource)),
 			Bun.write(avutilDestination, Bun.file(avutilSource)),
-            Bun.write(libsspDestination, Bun.file(libsspSource)),
+			Bun.write(libsspDestination, Bun.file(libsspSource)),
 			Bun.write(swresampleDestination, Bun.file(swresampleSource)),
 			// build bun main process
 			new Promise((resolve) => {
 				Bun.build({
 					...bunBuildOptions,
-          entrypoints: [bunSource],
+					entrypoints: [bunSource],
 					outdir: bunDestFolder,
 					minify: buildEnvironment !== "dev",
-          target: "bun",
-          naming:"index.js"
+					target: "bun",
+					naming: "index.js"
 				})
 					.then(buildResult => {
 						if (!buildResult.success) {
@@ -813,14 +813,14 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 				} else {
 					const tarballFileName = getTarballFileName(appFileName, OS);
 
-				const urlToPrevVersion = await fetch(`${config.release.baseUrl.replace(/\/+$/, "")}/latest`, {
-					"headers": {
-						'User-Agent': 'node-fetch-example',
-						'Accept': 'application/json'
-					},
-					"body": null,
-					"method": "GET"
-				});
+					const urlToPrevVersion = await fetch(`${config.release.baseUrl.replace(/\/+$/, "")}/latest`, {
+						"headers": {
+							'User-Agent': 'node-fetch-example',
+							'Accept': 'application/json'
+						},
+						"body": null,
+						"method": "GET"
+					});
 
 					const json = await urlToPrevVersion.json();
 					const latestVersion = json.tag_name;
@@ -1128,7 +1128,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 				})
 			])
 			console.log("After moving artifacts:", new Date().getTime() - start);
-    }
+		}
 	}
 
 	// Take over as the terminal's foreground process group (macOS/Linux).

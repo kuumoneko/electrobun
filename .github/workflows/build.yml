@@ -36,15 +36,15 @@ jobs:
 
             - run: bun install
 
-            # 3. Cache the heavy custom downloaded binaries from test.ts
+            # 3. Cache the heavy custom downloaded binaries from build.ts
             - name: Setup Script Binaries Cache
               uses: actions/cache@v4
               with:
                   path: ${{ github.workspace }}/package/vendors/binaries
-                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
+                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/build.ts') }}
                   restore-keys: ${{ runner.os }}-script-deps-
 
-            - run: bun test.ts --release
+            - run: bun build.ts --release
     build-linux:
         needs: build-macos
         runs-on: ubuntu-22.04
@@ -82,18 +82,18 @@ jobs:
 
             - run: bun install
 
-            # 3. Cache the heavy custom downloaded binaries from test.ts
+            # 3. Cache the heavy custom downloaded binaries from build.ts
             - name: Setup Script Binaries Cache
               uses: actions/cache@v4
               with:
                   path: ${{ github.workspace }}/package/vendors/binaries
-                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
+                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/build.ts') }}
                   restore-keys: ${{ runner.os }}-script-deps-
 
             - name: run Build
               env:
                   PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-              run: bun test.ts --release
+              run: bun build.ts --release
     build-windows:
         needs: build-linux
         runs-on: windows-latest
@@ -126,8 +126,8 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: package/vendors
-                  # This creates a cache specific to your test.ts file changes
-                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/test.ts') }}
+                  # This creates a cache specific to your build.ts file changes
+                  key: ${{ runner.os }}-script-deps-${{ hashFiles('package/build.ts') }}
                   restore-keys: |
                       ${{ runner.os }}-script-deps-
-            - run: bun test.ts --release
+            - run: bun build.ts --release

@@ -1,7 +1,6 @@
-// Run this script via terminal or command line with bun build.ts
-
 import { $ } from "bun";
-import { join, dirname, relative, basename, resolve } from "path";
+import { platform, arch } from "os";
+import { join } from "path";
 import {
 	existsSync,
 	readdirSync,
@@ -16,8 +15,6 @@ import { parseArgs } from "util";
 import process from "process";
 import { BUN_VERSION } from "./src/shared/bun-version";
 
-console.log("building for Windows x64...");
-
 const { values: args } = parseArgs({
 	args: Bun.argv,
 	options: {
@@ -29,13 +26,15 @@ const { values: args } = parseArgs({
 });
 
 const CHANNEL: "debug" | "release" = args.release ? "release" : "debug";
-const OS = "win";
-const ARCH = "x64";
-const binExt = ".exe";
-const bunBin = "bun.exe";
-const zigBinary = "zig.exe";
+const IS_NPM_BUILD = args.npm || false;
+const OS = getPlatform();
+const ARCH = getArch();
+const isWindows = platform() === "win32";
+const binExt = OS === "win" ? ".exe" : "";
+const libExt = OS === "win" ? ".dll" : OS === "macos" ? ".dylib" : ".so";
+const bunBin = isWindows ? "bun.exe" : "bun";
+const zigBinary = OS === "win" ? "zig.exe" : "zig";
 
-// PATHS
 const PATH = {
 	bun: {
 		RUNTIME: join(process.cwd(), "vendors", "bun", bunBin),
@@ -52,6 +51,33 @@ const MIN_DOWNLOAD_SIZES: Record<string, number> = {
 	"zig-zstd": 100 * 1024,
 };
 
+var CMAKE_BIN = "cmake";
+var VCVARSALL_PATH = "";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function getPlatform(): "win" | "linux" | "macos" {
+	switch (platform()) {
+		case "win32": return "win";
+		case "darwin": return "macos";
+		case "linux": return "linux";
+		default: throw new Error("unsupported platform");
+	}
+}
+
+function getArch(): "arm64" | "x64" {
+	switch (arch()) {
+		case "arm64": return "arm64";
+		case "x64": return "x64";
+		default: throw new Error("unsupported arch");
+	}
+}
+
+function isNewer(source: string, target: string) {
+	if (!existsSync(target)) return true;
+	return statSync(source).mtimeMs > statSync(target).mtimeMs;
+}
+
 function validateDownload(filePath: string, type: string): void {
 	if (!existsSync(filePath)) {
 		throw new Error(`Download failed: ${filePath} does not exist`);
@@ -60,59 +86,98 @@ function validateDownload(filePath: string, type: string): void {
 	const minSize = MIN_DOWNLOAD_SIZES[type];
 	if (minSize && stats.size < minSize) {
 		unlinkSync(filePath);
-		throw new Error(
-			`Download failed: ${filePath} is only ${stats.size} bytes (expected > ${minSize} bytes). Please try again.`,
-		);
+		throw new Error(`Download failed: ${filePath} is only ${stats.size} bytes`);
 	}
 }
 
 let lastGitHubDownload = 0;
+
 async function pauseForGitHub(): Promise<void> {
 	const now = Date.now();
 	const timeSinceLastDownload = now - lastGitHubDownload;
 	const pauseDuration = 500;
 	if (lastGitHubDownload > 0 && timeSinceLastDownload < pauseDuration) {
 		const remainingPause = pauseDuration - timeSinceLastDownload;
-		console.log(`Pausing ${Math.ceil(remainingPause / 1000)} seconds before next GitHub download...`);
+		console.log(`Pausing ${Math.ceil(remainingPause / 1000)}s before next GitHub download...`);
 		await new Promise((resolve) => setTimeout(resolve, remainingPause));
 	}
 	lastGitHubDownload = Date.now();
 }
 
-var CMAKE_BIN = "cmake";
-var VCVARSALL_PATH = "";
+// ── Entry point ──────────────────────────────────────────────────────────────
 
 try {
-	await setup();
-	await build();
-	await copyToDist();
+	if (IS_NPM_BUILD) {
+		await buildForNpm();
+	} else {
+		await setup();
+		await build();
+		await copyToDist();
+	}
 } catch (err) {
 	console.log(err);
+	process.exit(1);
+}
+
+// ── Dependency checking ──────────────────────────────────────────────────────
+
+async function vendorCmake() {
+	if (OS !== "macos") return;
+
+	const vendoredCmakePath = join(process.cwd(), "vendors", "cmake", "CMake.app", "Contents", "bin", "cmake");
+
+	try {
+		await $`which cmake`.quiet();
+		console.log("✓ cmake found in system PATH");
+		CMAKE_BIN = "cmake";
+		return;
+	} catch {
+		if (existsSync(vendoredCmakePath)) {
+			CMAKE_BIN = vendoredCmakePath;
+			console.log("✓ Using vendored cmake");
+			return;
+		}
+	}
+
+	console.log("cmake not found, downloading...");
+	const cmakeVersion = "3.30.2";
+	const cmakeUrl = `https://github.com/Kitware/CMake/releases/download/v${cmakeVersion}/cmake-${cmakeVersion}-macos-universal.tar.gz`;
+
+	await $`mkdir -p vendors`;
+	const tempFile = "vendors/cmake_temp.tar.gz";
+	await $`curl -L "${cmakeUrl}" -o "${tempFile}"`;
+	await $`cd vendors && tar -xzf cmake_temp.tar.gz`;
+	await $`rm -f vendors/cmake_temp.tar.gz`;
+
+	const extractedDir = `vendors/cmake-${cmakeVersion}-macos-universal`;
+	if (existsSync(extractedDir)) {
+		await $`rm -rf vendors/cmake`;
+		await $`mv "${extractedDir}" vendors/cmake`;
+	}
+	CMAKE_BIN = vendoredCmakePath;
+	await $`"${CMAKE_BIN}" --version`;
+	console.log("✓ cmake vendored successfully");
 }
 
 async function findMsvcTools() {
+	if (OS !== "win") return;
+
 	try {
 		const vswherePath = join(
 			process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
-			"Microsoft Visual Studio",
-			"Installer",
-			"vswhere.exe",
+			"Microsoft Visual Studio", "Installer", "vswhere.exe",
 		);
 		if (!existsSync(vswherePath)) {
 			console.log("vswhere not found, using default tool names");
 			return;
 		}
-
-		const vsInstallResult =
-			await $`powershell -command "& '${vswherePath}' -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath"`.quiet();
+		const vsInstallResult = await $`powershell -command "& '${vswherePath}' -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath"`.quiet();
 		if (vsInstallResult.exitCode !== 0 || !vsInstallResult.stdout.toString().trim()) {
 			console.log("Could not find Visual Studio installation path");
 			return;
 		}
-
 		const vsInstallPath = vsInstallResult.stdout.toString().trim();
 		VCVARSALL_PATH = join(vsInstallPath, "VC", "Auxiliary", "Build", "vcvarsall.bat");
-
 		if (!existsSync(VCVARSALL_PATH)) {
 			console.log("vcvarsall.bat not found at expected location");
 			VCVARSALL_PATH = "";
@@ -125,10 +190,9 @@ async function findMsvcTools() {
 }
 
 async function runMsvcCommand(command: string) {
-	if (!VCVARSALL_PATH) {
-		return await $`${command}`;
-	}
-	const tempBat = join(process.cwd(), "temp_build_cmd.bat");
+	if (!VCVARSALL_PATH) return await $`${command}`;
+	const uniqueId = `${Date.now()}_${Math.floor(Math.random() * 10)}`;
+	const tempBat = join(process.cwd(), `temp_build_cmd_${uniqueId}.bat`);
 	const batContent = `@echo off\ncall "${VCVARSALL_PATH}" x64 >nul\n${command}`;
 	writeFileSync(tempBat, batContent);
 	try {
@@ -148,138 +212,83 @@ async function installWindowsDeps() {
 	}
 	console.log("Running Windows dependency installer (may require Administrator privileges)...");
 	await $`powershell -ExecutionPolicy Bypass -NoProfile -File "${scriptPath}"`;
-	console.log("Windows dependency installer finished. Re-checking dependencies...");
+	console.log("Windows dependency installer finished.");
 }
 
 async function checkDependencies() {
 	const missingDeps: string[] = [];
-	await findMsvcTools();
 
-	try {
-		await $`where cmake`.quiet();
-		CMAKE_BIN = "cmake";
-	} catch {
-		missingDeps.push("cmake");
+	if (OS === "macos") {
+		await vendorCmake();
+		try { await $`which make`.quiet(); } catch { missingDeps.push("make (install Xcode Command Line Tools: xcode-select --install)"); }
+	} else if (OS === "win") {
+		await findMsvcTools();
+		try { await $`where cmake`.quiet(); CMAKE_BIN = "cmake"; } catch { missingDeps.push("cmake"); }
+		let vsFound = false;
+		try {
+			const vswherePath = join(
+				process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+				"Microsoft Visual Studio", "Installer", "vswhere.exe",
+			);
+			const out = existsSync(vswherePath)
+				? await $`powershell -command "& '${vswherePath}' -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath"`.quiet()
+				: await $`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`.quiet();
+			if (out.exitCode === 0 && out.stdout.toString().trim()) vsFound = true;
+		} catch { vsFound = false; }
+		if (!vsFound) missingDeps.push("visual-studio");
+
+		if (missingDeps.length > 0) {
+			if (process.env["GITHUB_ACTIONS"]) {
+				console.warn("\n⚠️ Missing required dependencies in CI - continuing");
+			} else {
+				try { await installWindowsDeps(); } catch { console.error("Auto-install failed or was cancelled."); }
+			}
+		}
+	} else if (OS === "linux") {
+		try { await $`which cmake`.quiet(); CMAKE_BIN = "cmake"; } catch { missingDeps.push("cmake"); }
+		try { await $`which make`.quiet(); } catch { missingDeps.push("make"); }
+		try { await $`which gcc`.quiet(); } catch { missingDeps.push("build-essential"); }
+		try { await $`which g++`.quiet(); } catch { missingDeps.push("g++"); }
+		try { await $`which pkg-config`.quiet(); } catch { missingDeps.push("pkg-config"); }
 	}
-
-	let vsFound = false;
-	try {
-		const vswherePath = join(
-			process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
-			"Microsoft Visual Studio",
-			"Installer",
-			"vswhere.exe",
-		);
-		const out = existsSync(vswherePath)
-			? await $`powershell -command "& '${vswherePath}' -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath"`.quiet()
-			: await $`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`.quiet();
-
-		if (out.exitCode === 0 && out.stdout.toString().trim()) vsFound = true;
-	} catch {
-		vsFound = false;
-	}
-
-	if (!vsFound) missingDeps.push("visual-studio");
 
 	if (missingDeps.length > 0) {
+		console.error("\n⚠️ Missing required dependencies:");
+		missingDeps.forEach((dep) => console.error(`  • ${dep}`));
+		if (OS === "macos") {
+			console.error("\n  Install Xcode Command Line Tools:\n    xcode-select --install");
+		} else if (OS === "win") {
+			console.error("\n  1. Install Visual Studio 2022 with C++ development tools");
+			console.error("  2. Install cmake from: https://cmake.org/download/");
+		} else if (OS === "linux") {
+			console.error("\n    sudo apt update && sudo apt install -y build-essential cmake pkg-config");
+		}
 		if (process.env["GITHUB_ACTIONS"]) {
-			console.warn("\n⚠️ Missing required dependencies in CI - continuing");
+			console.warn("\n⚠️ Running in CI - continuing despite missing dependencies");
 		} else {
-			try {
-				await installWindowsDeps();
-			} catch {
-				console.error("Auto-install failed or was cancelled.");
-			}
-			// Strict check after install omitted for brevity; assuming installer handles it
+			throw new Error("Missing required dependencies. Please install them and try again.");
 		}
 	}
 	console.log("✓ All required dependencies found");
 }
 
+// ── Setup / Vendoring ────────────────────────────────────────────────────────
+
 async function setup() {
-	await Promise.all([
-		checkDependencies(),
-		vendorBun(),
-		vendorZstd(),
-		vendorZig(),
-		vendorWebview2(),
-		vendorBsdiff(),
-	])
-	// await vendorBsdiff();
-}
-
-async function build() {
-	await createDistFolder();
-	await BunInstall();
-	await buildNative();
-	console.log("okok\n")
-
-	await buildPreload();
-	console.log("\n")
-
-	await buildCli();
-	console.log("\n")
-
-	await buildMainJs();
-	console.log("\n")
-
-	await buildLauncher();
-	console.log("\n")
-}
-
-async function copyApiFiles() {
-	await $`cp -R src/bun/ dist/api`;
-	await $`cp -R src/browser/ dist/api`;
-	await $`cp -R src/shared/ dist/api`;
-}
-
-async function copyToDist() {
-	await Promise.all([
-		$`cp ${PATH.bun.RUNTIME} ${PATH.bun.DIST}`,
-		$`cp src/launcher/zig-out/bin/launcher${binExt} dist/launcher${binExt}`,
-		$`cp vendors/zig-bsdiff/bsdiff${binExt} dist/bsdiff${binExt}`,
-		$`cp vendors/zig-bsdiff/bspatch${binExt} dist/bspatch${binExt}`,
-		$`cp vendors/zig-zstd/zig-zstd${binExt} dist/zig-zstd${binExt}`,
-		$`cp src/npmbin/index.js dist/npmbin.js`,
-		$`cp src/cli/build/electrobun${binExt} dist/electrobun${binExt}`,
-		$`mkdir -p bin && cp src/cli/build/electrobun${binExt} bin/electrobun${binExt}`,
-		copyApiFiles(),
-		$`cp src/native/win/build/libNativeWrapper.dll dist/libNativeWrapper.dll`,
-		$`cp vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2Loader.dll dist/WebView2Loader.dll`,
-		$`cp src/mpv/mpv${binExt} dist/mpv${binExt}`,
-		$`cp src/mpv/libmpv.dll dist/libmpv.dll`,
-		$`cp smtc/build/smtc.dll dist/smtc.dll`,
-		$`cp smtc/build/aumid.dll dist/aumid.dll`,
-		$`cp smtc/build/filedialog.dll dist/filedialog.dll`,
-		$`cp ffmpeg/avformat-62.dll dist/avformat-62.dll`,
-		$`cp ffmpeg/avcodec-62.dll dist/avcodec-62.dll`,
-		$`cp ffmpeg/avutil-60.dll dist/avutil-60.dll`,
-		$`cp ffmpeg/libssp-0.dll dist/libssp-0.dll`,
-		$`cp ffmpeg/swresample-6.dll dist/swresample-6.dll`
-	])
-	await createPlatformDistFolder();
-}
-
-async function createPlatformDistFolder() {
-	const platformDistDir = `dist-${OS}-${ARCH}`;
-	await $`rm -r ${platformDistDir}`.catch(() => { });
-	console.log(`Creating platform-specific dist folder: ${platformDistDir}`);
-	await $`mkdir -p ${platformDistDir}`;
-	await $`powershell -command "Copy-Item -Path 'dist\\*' -Destination '${platformDistDir}\\' -Recurse -Force"`;
-	console.log(`Successfully created and populated ${platformDistDir}`);
-}
-
-async function createDistFolder() {
-	await $`rm -r dist`.catch(() => { });
-	await $`mkdir -p dist/api/bun dist/api/browser`;
-}
-
-async function BunInstall() {
-	await $`${PATH.bun.RUNTIME} install`;
+	await checkDependencies();
+	await vendorBun();
+	await vendorBsdiff();
+	await vendorZstd();
+	await vendorZig();
+	if (OS === "win") {
+		await vendorWebview2();
+	} else {
+		await vendorAsar();
+		if (OS === "linux") await vendorLinuxDeps();
+	}
 }
 
 async function vendorBun() {
-	// TODO: use where.exe to find bun in local, reduce storage
 	const bunDir = join(process.cwd(), "vendors", "bun");
 	const bunVersionFile = join(bunDir, ".bun-version");
 
@@ -296,73 +305,155 @@ async function vendorBun() {
 	}
 
 	await pauseForGitHub();
+
+	let bunUrlSegment: string;
+	let bunDirName: string;
+
+	if (OS === "win") {
+		bunUrlSegment = "bun-windows-x64-baseline.zip";
+		bunDirName = "bun-windows-x64-baseline";
+	} else if (OS === "macos") {
+		bunUrlSegment = ARCH === "arm64" ? "bun-darwin-aarch64.zip" : "bun-darwin-x64.zip";
+		bunDirName = ARCH === "arm64" ? "bun-darwin-aarch64" : "bun-darwin-x64";
+	} else {
+		bunUrlSegment = ARCH === "arm64" ? "bun-linux-aarch64.zip" : "bun-linux-x64.zip";
+		bunDirName = ARCH === "arm64" ? "bun-linux-aarch64" : "bun-linux-x64";
+	}
+
 	const tempZipPath = join("vendors", "bun", "temp.zip");
 	const extractDir = join("vendors", "bun");
 
-	await $`mkdir -p ${extractDir} && curl -L -o ${tempZipPath} https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-windows-x64.zip`;
+	await $`mkdir -p ${extractDir} && curl -L -o ${tempZipPath} https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${bunUrlSegment}`;
 	validateDownload(tempZipPath, "bun");
 
-	await $`powershell -command "Expand-Archive -Path ${tempZipPath} -DestinationPath ${extractDir} -Force"`;
-	await $`mv ${join("vendors", "bun", "bun-windows-x64", "bun.exe")} ${PATH.bun.RUNTIME}`;
+	if (isWindows) {
+		await $`powershell -command "Expand-Archive -Path ${tempZipPath} -DestinationPath ${extractDir} -Force"`;
+	} else {
+		await $`unzip -o ${tempZipPath} -d ${extractDir}`;
+	}
+
+	if (isWindows) {
+		await $`mv ${join("vendors", "bun", bunDirName, "bun.exe")} ${PATH.bun.RUNTIME}`;
+	} else {
+		await $`mv ${join("vendors", "bun", bunDirName, "bun")} ${PATH.bun.RUNTIME}`;
+	}
+
+	if (!isWindows) {
+		await $`chmod +x ${PATH.bun.RUNTIME}`;
+	}
+
 	await $`rm ${tempZipPath}`;
-	await $`rm -rf ${join("vendors", "bun", "bun-windows-x64")}`;
+	await $`rm -rf ${join("vendors", "bun", bunDirName)}`;
 	writeFileSync(bunVersionFile, BUN_VERSION);
 }
 
 async function vendorZig() {
-	// TODO: use where.exe zig.exe to find zig in local path, reduce storage, recomend to use zvm to download zig
 	if (existsSync(PATH.zig.BIN)) return;
-	const zigFolder = `zig-windows-x86_64-0.13.0`;
-	await $`mkdir -p vendors/zig && curl -L https://ziglang.org/download/0.13.0/${zigFolder}.zip -o vendors/zig.zip && powershell -ExecutionPolicy Bypass -Command Expand-Archive -Path vendors/zig.zip -DestinationPath vendors/zig-temp && mv vendors/zig-temp/${zigFolder}/zig.exe vendors/zig && mv vendors/zig-temp/${zigFolder}/lib vendors/zig/`;
+
+	if (OS === "macos") {
+		const zigArch = ARCH === "arm64" ? "aarch64" : "x86_64";
+		await $`mkdir -p vendors/zig && curl -L https://ziglang.org/download/0.13.0/zig-macos-${zigArch}-0.13.0.tar.xz | tar -xJ --strip-components=1 -C vendors/zig zig-macos-${zigArch}-0.13.0/zig zig-macos-${zigArch}-0.13.0/lib zig-macos-${zigArch}-0.13.0/doc`;
+	} else if (OS === "win") {
+		const zigFolder = "zig-windows-x86_64-0.13.0";
+		await $`mkdir -p vendors/zig && curl -L https://ziglang.org/download/0.13.0/${zigFolder}.zip -o vendors/zig.zip && powershell -ExecutionPolicy Bypass -Command Expand-Archive -Path vendors/zig.zip -DestinationPath vendors/zig-temp && mv vendors/zig-temp/${zigFolder}/zig.exe vendors/zig && mv vendors/zig-temp/${zigFolder}/lib vendors/zig/`;
+	} else if (OS === "linux") {
+		const zigArch = ARCH === "arm64" ? "aarch64" : "x86_64";
+		await $`mkdir -p vendors/zig && curl -L https://ziglang.org/download/0.13.0/zig-linux-${zigArch}-0.13.0.tar.xz | tar -xJ --strip-components=1 -C vendors/zig zig-linux-${zigArch}-0.13.0/zig zig-linux-${zigArch}-0.13.0/lib zig-linux-${zigArch}-0.13.0/doc`;
+	}
 }
 
 async function vendorBsdiff() {
 	const bsdiffDir = join(process.cwd(), "vendors", "zig-bsdiff");
-	if (existsSync(join(bsdiffDir, "bsdiff" + binExt))) return;
+	const bsdiffBinPath = join(bsdiffDir, "bsdiff" + binExt);
+	const bspatchBinPath = join(bsdiffDir, "bspatch" + binExt);
 
-	await vendorZig();
-	const zigPath = PATH.zig.BIN;
+	if (existsSync(bsdiffBinPath) && existsSync(bspatchBinPath)) return;
 
-	const srcDir = join(process.cwd(), "vendors", "zig-bsdiff-src");
-	if (!existsSync(join(srcDir, "bsdiff.zig"))) {
-		console.log("Cloning zig-bsdiff source...");
-		await $`git clone --recursive https://github.com/blackboardsh/zig-bsdiff.git "${srcDir}"`;
+	await pauseForGitHub();
+	console.log("Downloading zig-bsdiff binaries...");
+
+	const bsdiffPlatformMap: Record<string, string> = { macos: "darwin", win: "win32", linux: "linux" };
+	const bsdiffPlatform = bsdiffPlatformMap[OS];
+	const tarballUrl = `https://github.com/blackboardsh/zig-bsdiff/releases/download/v0.1.19/zig-bsdiff-${bsdiffPlatform}-${ARCH}.tar.gz`;
+	const tempTarball = join("vendors", "zig-bsdiff-temp.tar.gz");
+
+	await $`mkdir -p ${bsdiffDir}`;
+	await $`curl -L "${tarballUrl}" -o "${tempTarball}"`;
+	validateDownload(tempTarball, "zig-bsdiff");
+	await $`tar -xzf "${tempTarball}" -C ${bsdiffDir}`;
+	await $`rm "${tempTarball}"`;
+
+	if (OS !== "win") {
+		await $`chmod +x ${bsdiffBinPath} ${bspatchBinPath}`;
 	}
-
-	console.log("Patching bsdiff.zig with --level support...");
-	const patchFile = join(process.cwd(), "patches", "zig-bsdiff", "bsdiff.zig");
-	await $`cp "${patchFile}" "${join(srcDir, "bsdiff.zig")}"`;
-
-	console.log("Building zig-bsdiff from source...");
-	await $`"${zigPath}" build -Doptimize=ReleaseFast`.cwd(srcDir);
-
-	await $`mkdir -p "${bsdiffDir}"`;
-	await $`cp "${join(srcDir, "zig-out", "bin", "bsdiff" + binExt)}" "${join(bsdiffDir, "bsdiff" + binExt)}"`;
-	await $`cp "${join(srcDir, "zig-out", "bin", "bspatch" + binExt)}" "${join(bsdiffDir, "bspatch" + binExt)}"`;
-	console.log("zig-bsdiff built successfully");
+	console.log("✓ zig-bsdiff binaries downloaded successfully");
 }
 
 async function vendorZstd() {
 	const zstdDir = join(process.cwd(), "vendors", "zig-zstd");
-	if (existsSync(join(zstdDir, "zig-zstd" + binExt))) return;
+	const zstdBinPath = join(zstdDir, "zig-zstd" + binExt);
+
+	if (existsSync(zstdBinPath)) return;
 
 	await pauseForGitHub();
 	console.log("Downloading zig-zstd binaries...");
-	const tempTarball = join("vendors", `zig-zstd-temp.tar.gz`);
 
-	await $`mkdir -p vendors/zig-zstd`;
-	await $`curl -fL -H "Accept: application/octet-stream" "https://github.com/blackboardsh/zig-zstd/releases/download/v0.1.3/zig-zstd-win32-x64.tar.gz" -o "${tempTarball}"`;
+	const zstdPlatformMap: Record<string, string> = { macos: "darwin", win: "win32", linux: "linux" };
+	const zstdPlatform = zstdPlatformMap[OS];
+	const tarballUrl = `https://github.com/blackboardsh/zig-zstd/releases/download/v0.1.3/zig-zstd-${zstdPlatform}-${ARCH}.tar.gz`;
+	const tempTarball = join("vendors", "zig-zstd-temp.tar.gz");
+
+	await $`mkdir -p ${zstdDir}`;
+	await $`curl -fL -H "Accept: application/octet-stream" "${tarballUrl}" -o "${tempTarball}"`;
 	validateDownload(tempTarball, "zig-zstd");
-	await $`tar -xzf "${tempTarball}" -C vendors/zig-zstd`;
+	await $`tar -xzf "${tempTarball}" -C ${zstdDir}`;
 	await $`rm "${tempTarball}"`;
+
+	if (OS !== "win") {
+		await $`chmod +x ${zstdBinPath}`;
+	}
+	console.log("✓ zig-zstd binaries downloaded successfully");
+}
+
+async function vendorAsar() {
+	if (OS === "win") return;
+	const ASAR_VERSION = "0.2.2";
+	const asarBaseDir = join(process.cwd(), "vendors", "zig-asar");
+	const asarPlatformMap: Record<string, string> = { macos: "darwin", linux: "linux" };
+	const asarPlatform = asarPlatformMap[OS];
+	const asarDir = asarBaseDir;
+	const asarLib = join(asarDir, "libasar" + libExt);
+
+	if (existsSync(asarLib)) return;
+
+	await pauseForGitHub();
+	console.log(`Downloading zig-asar binaries for ${asarPlatform}-${ARCH}...`);
+
+	const tarballUrl = `https://github.com/blackboardsh/zig-asar/releases/download/v${ASAR_VERSION}/zig-asar-${asarPlatform}-${ARCH}.tar.gz`;
+	const tempTarball = join("vendors", "zig-asar-temp.tar.gz");
+
+	await $`mkdir -p "${asarDir}"`;
+	await $`curl -L "${tarballUrl}" -o "${tempTarball}"`;
+	await $`tar -xzf "${tempTarball}" -C "${asarDir}"`;
+	await $`rm "${tempTarball}"`;
+
+	if (!existsSync(asarLib)) {
+		throw new Error(`ASAR library not found after extraction: ${asarLib}`);
+	}
+	if (OS !== "win") {
+		await $`chmod +x ${asarLib}`;
+	}
+	console.log("✓ zig-asar library downloaded successfully");
 }
 
 async function vendorNuget() {
+	if (OS !== "win") return;
 	if (existsSync(join(process.cwd(), "vendors", "nuget", "nuget.exe"))) return;
 	await $`mkdir -p vendors/nuget && curl -L -o vendors/nuget/nuget.exe https://dist.nuget.org/win-x86-commandline/latest/nuget.exe`;
 }
 
 async function vendorWebview2() {
+	if (OS !== "win") return;
 	if (existsSync(join(process.cwd(), "vendors", "webview2"))) return;
 	await vendorNuget();
 	await $`vendors/nuget/nuget.exe install Microsoft.Web.WebView2 -OutputDirectory vendors/webview2 -Source https://api.nuget.org/v3/index.json`;
@@ -374,128 +465,287 @@ async function vendorWebview2() {
 	}
 }
 
-function isNewer(source: string, target: string) {
-	if (!existsSync(target)) return true;
-	return statSync(source).mtimeMs > statSync(target).mtimeMs;
+async function vendorLinuxDeps() {
+	if (OS !== "linux") return;
+
+	const requiredPackages = [
+		"build-essential", "cmake", "pkg-config",
+		"libgtk-3-dev", "libwebkit2gtk-4.0-dev",
+		"libayatana-appindicator3-dev", "librsvg2-dev",
+		"fuse", "libfuse2", "libpango1.0-dev", "libharfbuzz-dev"
+	];
+
+	const distroInfo = await $`grep -E '^(ID|ID_LIKE)=' /etc/os-release`.catch(() => null);
+	if (!distroInfo || !(String(distroInfo.stdout).includes("debian") || String(distroInfo.stdout).includes("ubuntu"))) {
+		console.log("Non-Debian/Ubuntu distro detected - skipping automatic dependency check");
+		console.log(`Please ensure packages are installed: ${requiredPackages.join(", ")}`);
+		return;
+	}
+
+	console.log("Detected Debian/Ubuntu. Checking dependencies...");
+	const missingPackages: string[] = [];
+	for (const pkg of requiredPackages) {
+		const result = await $`dpkg -l | grep ${pkg}`.catch(() => null);
+		if (!result || String(result.stdout).trim() === "") {
+			missingPackages.push(pkg);
+		}
+	}
+	if (missingPackages.length > 0) {
+		console.log(`Missing packages: ${missingPackages.join(", ")}`);
+		console.log(`  sudo apt update && sudo apt install -y ${missingPackages.join(" ")}`);
+		if (process.env["GITHUB_ACTIONS"]) {
+			console.warn("⚠️ Running in CI - continuing despite missing packages");
+		} else {
+			console.warn("⚠️ Some features may not work - continuing anyway");
+		}
+	}
+	console.log("All required packages are installed");
 }
+
+// ── Build ────────────────────────────────────────────────────────────────────
+
+async function build() {
+	await createDistFolder();
+	await BunInstall();
+	await buildNative();
+	await buildPreload();
+	await buildCli();
+	await buildMainJs();
+	await buildLauncher();
+}
+
+async function buildForNpm() {
+	console.log("Building for npm (JS/TS files only)...");
+	await createDistFolder();
+	await buildMainJs();
+	await buildPreload();
+	await copyApiFiles();
+	console.log("npm build complete! dist/ contains main.js and api/ folder.");
+}
+
+async function createDistFolder() {
+	await $`rm -r dist`.catch(() => { });
+	await $`mkdir -p dist/api/bun dist/api/browser`;
+}
+
+async function copyApiFiles() {
+	if (OS === "win") {
+		await $`cp -R src/bun/ dist/api`;
+		await $`cp -R src/browser/ dist/api`;
+		await $`cp -R src/shared/ dist/api`;
+	} else {
+		await $`cp -R src/bun dist/api/`;
+		await $`cp -R src/browser dist/api/`;
+		await $`cp -R src/shared dist/api/`;
+	}
+}
+
+async function BunInstall() {
+	await $`${PATH.bun.RUNTIME} install`;
+}
+
+// ── Build Native ─────────────────────────────────────────────────────────────
 
 async function buildNative() {
-	const webview2Include = `./vendors/webview2/Microsoft.Web.WebView2/build/native/include`;
-	const webview2Lib = `./vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2LoaderStatic.lib`;
-	const smtcSource = "./smtc/smtc.cpp"
-	const smtcObj = "./smtc/build/smtc.obj"
-	const smtcLib = "./smtc/build/smtc.dll"
+	if (OS === "macos") {
+		const asarLib = join(process.cwd(), "vendors", "zig-asar", "libasar.dylib");
 
-	const aumidSource = "./smtc/aumid.cpp"
-	const aumidObj = "./smtc/build/aumid.obj"
-	const aumidLib = "./smtc/build/aumid.dll"
+		await $`mkdir -p src/native/macos/build`;
+		const compileFlags = [
+			"clang++", "-c", "src/native/macos/nativeWrapper.mm",
+			"-o", "src/native/macos/build/nativeWrapper.o",
+			"-fobjc-arc", "-fno-objc-msgsend-selector-stubs",
+			"-std=c++20",
+		];
+		await $`${compileFlags}`;
 
-	const filedialogSource = "./smtc/filedialog.cpp"
-	const filedialogObj = "./smtc/build/filedialog.obj"
-	const filedialogLib = "./smtc/build/filedialog.dll"
+		await $`mkdir -p src/native/build`;
+		const linkFlags = [
+			"clang++", "-o", "src/native/build/libNativeWrapper.dylib",
+			"src/native/macos/build/nativeWrapper.o",
+			asarLib,
+			"-framework", "Cocoa", "-framework", "WebKit",
+			"-framework", "QuartzCore", "-framework", "Metal",
+			"-framework", "MetalKit", "-framework", "UserNotifications",
+			"-stdlib=libc++", "-shared",
+			"-install_name", "@executable_path/libNativeWrapper.dylib",
+			"-Wl,-rpath,@executable_path",
+		];
+		await $`${linkFlags}`;
+		console.log("✓ macOS native wrapper built successfully");
+	} else if (OS === "win") {
+		const webview2Include = "./vendors/webview2/Microsoft.Web.WebView2/build/native/include";
+		const webview2Lib = "./vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2LoaderStatic.lib";
 
-	const nativeWrapperSource = "./src/native/win/nativeWrapper.cpp"
-	const nativeWrapperObj = "./src/native/win/build/nativeWrapper.obj"
-	const nativeWrapperLib = "./src/native/win/build/libNativeWrapper.dll"
+		await $`mkdir -p src/native/win/build`;
+		await $`mkdir -p smtc/build`;
 
-	const cefInclude = `./vendors/cef`;
-	const cefLib = `./vendors/cef/Release/libcef.lib`;
-	const cefWrapperLib = `./vendors/cef/build/libcef_dll_wrapper/Release/libcef_dll_wrapper.lib`;
+		await Promise.all([
+			buildWindowsNativeWrapper(webview2Include, webview2Lib),
+			buildWindowsSmtc(),
+			buildWindowsAumid(),
+			buildWindowsFiledialog(),
+		]);
+	} else if (OS === "linux") {
+		if (!process.env["GITHUB_ACTIONS"]) {
+			try {
+				await $`pkg-config --exists webkit2gtk-4.0 gtk+-3.0 ayatana-appindicator3-0.1`;
+				console.log("✓ All required packages found via pkg-config");
+			} catch {
+				console.warn("⚠️ Some packages might be missing (pkg-config check failed), continuing anyway");
+			}
+		}
 
-	await $`mkdir -p src/native/win/build`;
-	await $`mkdir -p smtc/build`;
-	await Promise.all([
-		new Promise(async (res) => {
-			if (isNewer(nativeWrapperSource, nativeWrapperLib) || isNewer(nativeWrapperSource, nativeWrapperObj)) {
-				console.log("nativeWrapper.cpp is changed! Building...")
+		try {
+			let pkgConfigCflags = "";
+			let pkgConfigLibs = "";
+			let hasAppIndicator = false;
+
+			try {
+				const cflagsResult = await $`pkg-config --cflags webkit2gtk-4.0 gtk+-3.0 ayatana-appindicator3-0.1`.quiet();
+				pkgConfigCflags = cflagsResult.stdout.toString().trim();
+				const libsResult = await $`pkg-config --libs webkit2gtk-4.0 gtk+-3.0 ayatana-appindicator3-0.1`.quiet();
+				pkgConfigLibs = libsResult.stdout.toString().trim();
+				hasAppIndicator = true;
+			} catch {
 				try {
-					// await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /I"${cefInclude}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`);
-					// await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" "${cefLib}" "${cefWrapperLib}" delayimp.lib /DELAYLOAD:libcef.dll libcmt.lib /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
+					const cflagsResult = await $`pkg-config --cflags webkit2gtk-4.0 gtk+-3.0`.quiet();
+					pkgConfigCflags = cflagsResult.stdout.toString().trim();
+					const libsResult = await $`pkg-config --libs webkit2gtk-4.0 gtk+-3.0`.quiet();
+					pkgConfigLibs = libsResult.stdout.toString().trim();
+					console.warn("⚠️ Using pkg-config without ayatana-appindicator3-0.1");
+				} catch {
+					console.warn("⚠️ pkg-config failed, using fallback flags");
+					const targetArch = process.arch === "arm64" ? "aarch64" : "x86_64";
+					pkgConfigCflags = `-I/usr/include/gtk-3.0 -I/usr/include/webkit2gtk-4.0 -I/usr/include/glib-2.0 -I/usr/lib/${targetArch}-linux-gnu/glib-2.0/include -I/usr/include/pango-1.0 -I/usr/include/cairo -I/usr/include/gdk-pixbuf-2.0 -I/usr/include/atk-1.0`;
+					pkgConfigLibs = "-lgtk-3 -lwebkit2gtk-4.0 -lglib-2.0 -lgobject-2.0";
+				}
+			}
 
-					await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`);
-					await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" libcmt.lib /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
-				} catch (e) {
-					console.error(e);
-				}
-				res("");
-			}
-			else {
-				console.log("nativeWrapper.cpp is unchanged! Skipping...")
-				res("");
-			}
-		}),
-		new Promise(async (res) => {
-			if (isNewer(smtcSource, smtcLib) || isNewer(smtcSource, smtcObj)) {
-				console.log("smtc.cpp is changed! Building...")
-				try {
-					await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/smtc.obj smtc/smtc.cpp`);
-					await runMsvcCommand(`link /DLL /OUT:smtc/build/smtc.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib runtimeobject.lib mfplat.lib mf.lib /IMPLIB:smtc/build/smtc.lib smtc/build/smtc.obj`);
-				} catch (e) {
-					console.error(e);
-				}
-				res("");
-			}
-			else {
-				console.log("smtc.cpp is unchanged! Skipping...")
-				res("");
-			}
-		}),
-		new Promise(async (res) => {
-			if (isNewer(aumidSource, aumidLib) || isNewer(aumidSource, aumidObj)) {
-				console.log("aumid.cpp is changed! Building...")
-				try {
-					await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/aumid.obj smtc/aumid.cpp`);
-					await runMsvcCommand(`link /DLL /OUT:smtc/build/aumid.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib /IMPLIB:smtc/build/aumid.lib smtc/build/aumid.obj`);
-				} catch (e) {
-					console.error(e);
-				}
-				res("");
-			}
-			else {
-				console.log("aumid.cpp is unchanged! Skipping...")
-				res("");
-			}
-		}),
-		new Promise(async (res) => {
-			if (isNewer(filedialogSource, filedialogLib) || isNewer(filedialogSource, filedialogObj)) {
-				console.log("filedialog.cpp is changed! Building...")
-				try {
-					await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/filedialog.obj smtc/filedialog.cpp`);
-					await runMsvcCommand(`link /DLL /OUT:smtc/build/filedialog.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib /IMPLIB:smtc/build/filedialog.lib smtc/build/filedialog.obj`);
-				} catch (e) {
-					console.error(e);
-				}
-				res("");
-			}
-			else {
-				console.log("filedialog.cpp is unchanged! Skipping...")
-				res("");
-			}
-		}),
+			await $`mkdir -p src/native/linux/build`;
 
-	])
+			const cflagsParts = pkgConfigCflags.split(/\s+/).filter((f) => f);
+			const compileCmd = [
+				"g++", "-c", "-std=c++20", "-fPIC",
+				...cflagsParts,
+				...(hasAppIndicator ? [] : ["-DNO_APPINDICATOR"]),
+				"-o", "src/native/linux/build/nativeWrapper.o",
+				"src/native/linux/nativeWrapper.cpp",
+			];
+			await $`${compileCmd}`;
+
+			await $`mkdir -p src/native/build`;
+
+			const libsParts = pkgConfigLibs.split(/\s+/).filter((f) => f);
+			const linkCmd = [
+				"g++", "-shared",
+				"-o", "src/native/build/libNativeWrapper.so",
+				"src/native/linux/build/nativeWrapper.o",
+				...libsParts,
+				"-ldl", "-lpthread",
+			];
+			await $`${linkCmd}`;
+			console.log("✓ Linux native wrapper built successfully");
+		} catch (error) {
+			console.error("Linux native build failed:", error);
+			throw error;
+		}
+	}
 }
+
+async function buildWindowsNativeWrapper(webview2Include: string, webview2Lib: string) {
+	const nativeWrapperSource = "./src/native/win/nativeWrapper.cpp";
+	const nativeWrapperLib = "./src/native/win/build/libNativeWrapper.dll";
+	const nativeWrapperObj = "./src/native/win/build/nativeWrapper.obj";
+
+	if (isNewer(nativeWrapperSource, nativeWrapperLib) || isNewer(nativeWrapperSource, nativeWrapperObj)) {
+		console.log("nativeWrapper.cpp is changed! Building...");
+		try {
+			await runMsvcCommand(`cl /c /EHsc /std:c++20 /DNOMINMAX /MT /I"${webview2Include}" /D_USRDLL /D_WINDLL /Fosrc/native/win/build/nativeWrapper.obj src/native/win/nativeWrapper.cpp`);
+			await runMsvcCommand(`link /DLL /OUT:src/native/win/build/libNativeWrapper.dll user32.lib ole32.lib shell32.lib shlwapi.lib advapi32.lib dcomp.lib d2d1.lib kernel32.lib comctl32.lib "${webview2Lib}" libcmt.lib /IMPLIB:src/native/win/build/libNativeWrapper.lib src/native/win/build/nativeWrapper.obj`);
+		} catch (e) { console.error(e); }
+	} else {
+		console.log("nativeWrapper.cpp is unchanged! Skipping...");
+	}
+}
+
+async function buildWindowsSmtc() {
+	const source = "./smtc/smtc.cpp";
+	const lib = "./smtc/build/smtc.dll";
+	const obj = "./smtc/build/smtc.obj";
+	if (isNewer(source, lib) || isNewer(source, obj)) {
+		console.log("smtc.cpp is changed! Building...");
+		try {
+			await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/smtc.obj smtc/smtc.cpp`);
+			await runMsvcCommand(`link /DLL /OUT:smtc/build/smtc.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib runtimeobject.lib mfplat.lib mf.lib /IMPLIB:smtc/build/smtc.lib smtc/build/smtc.obj`);
+		} catch (e) { console.error(e); }
+	} else { console.log("smtc.cpp is unchanged! Skipping..."); }
+}
+
+async function buildWindowsAumid() {
+	const source = "./smtc/aumid.cpp";
+	const lib = "./smtc/build/aumid.dll";
+	const obj = "./smtc/build/aumid.obj";
+	if (isNewer(source, lib) || isNewer(source, obj)) {
+		console.log("aumid.cpp is changed! Building...");
+		try {
+			await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/aumid.obj smtc/aumid.cpp`);
+			await runMsvcCommand(`link /DLL /OUT:smtc/build/aumid.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib /IMPLIB:smtc/build/aumid.lib smtc/build/aumid.obj`);
+		} catch (e) { console.error(e); }
+	} else { console.log("aumid.cpp is unchanged! Skipping..."); }
+}
+
+async function buildWindowsFiledialog() {
+	const source = "./smtc/filedialog.cpp";
+	const lib = "./smtc/build/filedialog.dll";
+	const obj = "./smtc/build/filedialog.obj";
+	if (isNewer(source, lib) || isNewer(source, obj)) {
+		console.log("filedialog.cpp is changed! Building...");
+		try {
+			await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/filedialog.obj smtc/filedialog.cpp`);
+			await runMsvcCommand(`link /DLL /OUT:smtc/build/filedialog.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib /IMPLIB:smtc/build/filedialog.lib smtc/build/filedialog.obj`);
+		} catch (e) { console.error(e); }
+	} else { console.log("filedialog.cpp is unchanged! Skipping..."); }
+}
+
+// ── Build Launcher ───────────────────────────────────────────────────────────
 
 async function buildLauncher() {
-	console.log(`Building launcher for win x64...`);
-	const zigArgs = ["-Dtarget=x86_64-windows", "-Dcpu=baseline"];
-	const launcherLib = "./src/launcher/main.zig"
-	const launcherout = "./src/launcher/zig-out/bin/launcher.exe";
-	if (isNewer(launcherLib, launcherout)) {
-		console.log("Launcher is changed! Building...")
-		await $`cd src/launcher && zig build -Doptimize=ReleaseSmall ${zigArgs}`;
+	console.log(`Building launcher for ${OS} ${ARCH}...`);
+
+	let zigArgs: string[] = [];
+	if (OS === "win") {
+		zigArgs = ["-Dtarget=x86_64-windows", "-Dcpu=baseline"];
+	} else if (OS === "linux") {
+		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-linux"] : ["-Dtarget=x86_64-linux"];
+	} else if (OS === "macos") {
+		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-macos"] : ["-Dtarget=x86_64-macos"];
 	}
-	else {
-		console.log("Launcher is unchanged! Skipping...")
+
+	const launcherLib = "./src/launcher/main.zig";
+	const launcherOut = `./src/launcher/zig-out/bin/launcher${binExt}`;
+
+	if (isNewer(launcherLib, launcherOut)) {
+		console.log("Launcher is changed! Building...");
+		if (CHANNEL === "debug") {
+			await $`cd src/launcher && ../../vendors/zig/zig build ${zigArgs}`;
+		} else {
+			await $`cd src/launcher && ../../vendors/zig/zig build -Doptimize=ReleaseSmall ${zigArgs}`;
+		}
+	} else {
+		console.log("Launcher is unchanged! Skipping...");
 	}
 }
+
+// ── Build Main JS ────────────────────────────────────────────────────────────
 
 async function buildMainJs() {
 	const bunModule = await import("bun");
 	const sourceFile = "./src/launcher/main.ts";
 	const outFile = "./dist/main.js";
+
 	if (isNewer(sourceFile, outFile)) {
-		console.log("launcher main is changed! Building...")
+		console.log("launcher main is changed! Building...");
 		const result = await bunModule.build({
 			entrypoints: [join("src", "launcher", "main.ts")],
 			outdir: join("dist"),
@@ -504,29 +754,31 @@ async function buildMainJs() {
 		});
 		if (!existsSync(join("dist", "main.js"))) throw new Error("main.js was not created");
 		return result;
-	}
-	else {
+	} else {
 		console.log("launcher main is unchanged! Skipping...");
-		return {
-			success: true,
-			logs: [],
-			outputs: []
-		} as unknown as Bun.BuildOutput;
+		return { success: true, logs: [], outputs: [] } as unknown as Bun.BuildOutput;
 	}
 }
 
+// ── Build CLI ────────────────────────────────────────────────────────────────
+
 async function buildCli() {
 	const cliFile = "./src/cli/index.ts";
-	const outFile = "./src/cli/build/electrobun.exe";
+	const outFile = `./src/cli/build/electrobun${binExt}`;
+
 	if (isNewer(cliFile, outFile)) {
 		console.log("Cli is changed! Building...");
-		await
-			$`BUN_INSTALL_CACHE_DIR=/tmp/bun-cache ${PATH.bun.RUNTIME} build ${cliFile.split("./")[1]} --compile --target=bun-windows-x64 --outfile ${outFile.split("./")[1].split(".exe")[0]}`;
-	}
-	else {
+
+		const args = ["build", cliFile.replace("./", ""), "--compile"];
+		if (isWindows) args.push("--target=bun-windows-x64-baseline");
+		args.push("--outfile", outFile.replace("./", "").replace(binExt, ""));
+		await $`BUN_INSTALL_CACHE_DIR=/tmp/bun-cache ${PATH.bun.RUNTIME} ${args}`;
+	} else {
 		console.log("Cli is unchanged! Skipping...");
 	}
 }
+
+// ── Build Preload ────────────────────────────────────────────────────────────
 
 async function buildPreload() {
 	const preloadDir = join(process.cwd(), "src", "bun", "preload");
@@ -535,16 +787,73 @@ async function buildPreload() {
 	mkdirSync(outputDir, { recursive: true });
 
 	if (isNewer(join(preloadDir, "index.ts"), outputPath)) {
-		console.log("Preload script is changed! Building...")
+		console.log("Preload script is changed! Building...");
 
 		const bunModule = await import("bun");
-		const fullResult = await bunModule.build({ entrypoints: [join(preloadDir, "index.ts")], outdir: "prebuilt", target: "browser", format: "esm", minify: false });
+		const fullResult = await bunModule.build({
+			entrypoints: [join(preloadDir, "index.ts")],
+			outdir: "prebuilt",
+			target: "browser",
+			format: "esm",
+			minify: false,
+		});
 
 		const fullPreloadJs = `(function(){${await fullResult.outputs[0].text()}})();`;
-
 		writeFileSync(outputPath, `export const preloadScript = ${JSON.stringify(fullPreloadJs)};`);
-	}
-	else {
+	} else {
 		console.log("Preload script is unchanged! Skipping...");
 	}
+}
+
+// ── Copy to Dist ─────────────────────────────────────────────────────────────
+
+async function copyToDist() {
+	await Promise.all([
+		$`cp ${PATH.bun.RUNTIME} ${PATH.bun.DIST}`,
+		$`cp src/launcher/zig-out/bin/launcher${binExt} dist/launcher${binExt}`,
+		$`cp vendors/zig-bsdiff/bsdiff${binExt} dist/bsdiff${binExt}`,
+		$`cp vendors/zig-bsdiff/bspatch${binExt} dist/bspatch${binExt}`,
+		$`cp vendors/zig-zstd/zig-zstd${binExt} dist/zig-zstd${binExt}`,
+		$`cp src/npmbin/index.js dist/npmbin.js`,
+		$`cp src/cli/build/electrobun${binExt} dist/electrobun${binExt}`,
+		$`cp src/mpv/libmpv.dll dist/libmpv.dll`,
+		$`mkdir -p bin && cp src/cli/build/electrobun${binExt} bin/electrobun${binExt}`,
+		copyApiFiles(),
+	]);
+
+	if (OS === "macos") {
+		await $`cp src/native/build/libNativeWrapper.dylib dist/libNativeWrapper.dylib`;
+		await $`cp vendors/zig-asar/libasar.dylib dist/libasar.dylib`;
+	} else if (OS === "win") {
+		await $`cp src/native/win/build/libNativeWrapper.dll dist/libNativeWrapper.dll`;
+		await $`cp vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2Loader.dll dist/WebView2Loader.dll`;
+		await $`cp smtc/build/smtc.dll dist/smtc.dll`;
+		await $`cp smtc/build/aumid.dll dist/aumid.dll`;
+		await $`cp smtc/build/filedialog.dll dist/filedialog.dll`;
+		await $`cp ffmpeg/avformat-62.dll dist/avformat-62.dll`;
+		await $`cp ffmpeg/avcodec-62.dll dist/avcodec-62.dll`;
+		await $`cp ffmpeg/avutil-60.dll dist/avutil-60.dll`;
+		await $`cp ffmpeg/libssp-0.dll dist/libssp-0.dll`;
+		await $`cp ffmpeg/swresample-6.dll dist/swresample-6.dll`;
+	} else if (OS === "linux") {
+		if (existsSync(join(process.cwd(), "src", "native", "build", "libNativeWrapper.so"))) {
+			await $`cp src/native/build/libNativeWrapper.so dist/libNativeWrapper.so`;
+		}
+	}
+
+	await createPlatformDistFolder();
+}
+
+async function createPlatformDistFolder() {
+	const platformDistDir = `dist-${OS}-${ARCH}`;
+	await $`rm -r ${platformDistDir}`.catch(() => { });
+	console.log(`Creating platform-specific dist folder: ${platformDistDir}`);
+	await $`mkdir -p ${platformDistDir}`;
+
+	if (OS === "win") {
+		await $`powershell -command "Copy-Item -Path 'dist\\*' -Destination '${platformDistDir}\\' -Recurse -Force"`;
+	} else {
+		await $`cp -r dist/ ${platformDistDir}/`
+	}
+	console.log(`Successfully created and populated ${platformDistDir}`);
 }

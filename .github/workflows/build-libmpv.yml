@@ -1,0 +1,359 @@
+name: Build libmpv (audio-only)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PREFIX: ${{ github.workspace }}/prefix
+  MPV_VERSION: v0.39.0
+  FFMPEG_VERSION: n7.1
+  LIBPLACEBO_VERSION: v7.349.0
+  LIBASS_VERSION: 0.17.3
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mpv
+        uses: actions/checkout@v4
+        with:
+          repository: mpv-player/mpv
+          ref: ${{ env.MPV_VERSION }}
+          path: mpv
+
+      - name: Install system deps
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build pkg-config nasm \
+            libasound2-dev libcurl4-openssl-dev
+
+      - name: Cache ffmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PREFIX }}
+          key: ffmpeg-linux-${{ env.FFMPEG_VERSION }}
+
+      - name: Build ffmpeg (audio-only)
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+            https://git.ffmpeg.org/ffmpeg.git ffmpeg
+          cd ffmpeg
+          ./configure \
+            --prefix=${{ env.PREFIX }} \
+            --enable-static --disable-shared --enable-pic --enable-small \
+            --disable-doc --disable-debug --disable-programs \
+            --disable-avdevice --disable-avfilter --disable-swscale \
+            --disable-postproc --disable-everything \
+            --enable-network --enable-zlib --enable-openssl \
+            --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
+              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
+              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
+              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
+              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
+              pcm_u32le,pcm_u32be,pcm_s8, \
+              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
+              eac3,mlp,wavpack,tta,cook,shorten,tak, \
+              mp1,mp1float,mp2,mp2float,mp3,mp3float \
+            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
+              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
+              image2,pcm_alaw,pcm_mulaw,flv \
+            --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+            --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+            --enable-muxer=null,wav --enable-encoder=pcm_s16le
+          make -j$(nproc) install
+
+      - name: Build libplacebo
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+            https://github.com/haasn/libplacebo.git
+          cd libplacebo
+          meson setup build \
+            -Ddefault_library=static -Dbuildtype=release \
+            -Ddemos=false -Dtests=false -Dbench=false \
+            -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+            --prefix ${{ env.PREFIX }}
+          meson install -C build
+
+      - name: Build libass
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+            https://github.com/libass/libass.git
+          cd libass
+          meson setup build \
+            -Ddefault_library=static -Dbuildtype=release \
+            -Dtests=false \
+            --prefix ${{ env.PREFIX }}
+          meson install -C build
+
+      - name: Build libmpv
+        run: |
+          cd mpv
+          meson setup build \
+            -Dcplayer=false -Dlibmpv=true \
+            -Ddefault_library=shared -Dbuildtype=release \
+            -Dbuild-date=false -Dgpl=false \
+            -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+            -Dlibcurl=enabled -Dalsa=enabled \
+            -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+            -Dx11=disabled -Dwayland=disabled -Ddrm=disabled -Dgbm=disabled \
+            -Dvdpau=disabled -Dvaapi=disabled -Dcuda-hwaccel=disabled \
+            -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+            -Dlibarchive=disabled -Drubberband=disabled \
+            -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+            -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
+            -Diconv=disabled -Dzlib=disabled \
+            -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
+            -Doss-audio=disabled -Dsndio=disabled -Dopenal=disabled \
+            -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled \
+            -Dcaca=disabled -Dsixel=disabled \
+            -Dmanpage-build=disabled -Dtests=disabled \
+            -Dc_args='-ffunction-sections -fdata-sections' \
+            -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed' \
+            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig
+          meson compile -C build
+          strip build/libmpv.so
+          ls -lh build/libmpv.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-linux-x86_64
+          path: mpv/build/libmpv.so
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 -ucrt64 {0}
+    steps:
+      - name: Checkout mpv
+        uses: actions/checkout@v4
+        with:
+          repository: mpv-player/mpv
+          ref: ${{ env.MPV_VERSION }}
+          path: mpv
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-{toolchain,meson,ninja,pkgconf,cmake,
+            nasm,curl,libcurl,openssl,zlib}
+
+      - name: Cache ffmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PREFIX }}
+          key: ffmpeg-windows-${{ env.FFMPEG_VERSION }}
+
+      - name: Build ffmpeg (audio-only)
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+            https://git.ffmpeg.org/ffmpeg.git ffmpeg
+          cd ffmpeg
+          ./configure \
+            --prefix=${{ env.PREFIX }} \
+            --arch=x86_64 --target-os=mingw32 \
+            --cross-prefix=x86_64-w64-mingw32- \
+            --enable-static --disable-shared --enable-pic --enable-small \
+            --disable-doc --disable-debug --disable-programs \
+            --disable-avdevice --disable-avfilter --disable-swscale \
+            --disable-postproc --disable-everything \
+            --enable-network --enable-zlib --enable-openssl \
+            --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
+              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
+              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
+              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
+              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
+              pcm_u32le,pcm_u32be,pcm_s8, \
+              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
+              eac3,mlp,wavpack,tta,cook,shorten,tak, \
+              mp1,mp1float,mp2,mp2float,mp3,mp3float \
+            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
+              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
+              image2,pcm_alaw,pcm_mulaw,flv \
+            --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+            --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+            --enable-muxer=null,wav --enable-encoder=pcm_s16le
+          make -j$(nproc) install
+
+      - name: Build libplacebo
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+            https://github.com/haasn/libplacebo.git
+          cd libplacebo
+          meson setup build \
+            -Ddefault_library=static -Dbuildtype=release \
+            -Ddemos=false -Dtests=false -Dbench=false \
+            -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+            --prefix ${{ env.PREFIX }}
+          meson install -C build
+
+      - name: Build libass
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+            https://github.com/libass/libass.git
+          cd libass
+          meson setup build \
+            -Ddefault_library=static -Dbuildtype=release \
+            -Dtests=false \
+            --prefix ${{ env.PREFIX }}
+          meson install -C build
+
+      - name: Build libmpv
+        run: |
+          cd mpv
+          meson setup build \
+            -Dcplayer=false -Dlibmpv=true \
+            -Ddefault_library=shared -Dbuildtype=release \
+            -Dbuild-date=false -Dgpl=false \
+            -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+            -Dlibcurl=enabled -Dwasapi=enabled -Dwin32-smtc=disabled \
+            -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+            -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
+            -Dd3d11=disabled -Ddirect3d=disabled \
+            -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled -Damf=disabled \
+            -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+            -Dlibarchive=disabled -Drubberband=disabled \
+            -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+            -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
+            -Diconv=disabled -Dzlib=disabled \
+            -Dcaca=disabled \
+            -Dmanpage-build=disabled -Dtests=disabled \
+            -Dc_args='-ffunction-sections -fdata-sections' \
+            -Dc_link_args='-Wl,--gc-sections' \
+            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig
+          meson compile -C build
+          x86_64-w64-mingw32-strip build/libmpv-2.dll
+          ls -lh build/libmpv-2.dll
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-windows-x86_64
+          path: mpv/build/libmpv-2.dll
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout mpv
+        uses: actions/checkout@v4
+        with:
+          repository: mpv-player/mpv
+          ref: ${{ env.MPV_VERSION }}
+          path: mpv
+
+      - name: Install system deps
+        run: |
+          brew update
+          brew install meson ninja pkg-config nasm \
+            openssl@3 zlib curl
+
+      - name: Cache ffmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PREFIX }}
+          key: ffmpeg-macos-${{ env.FFMPEG_VERSION }}
+
+      - name: Build ffmpeg (audio-only)
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+            https://git.ffmpeg.org/ffmpeg.git ffmpeg
+          cd ffmpeg
+          ./configure \
+            --prefix=${{ env.PREFIX }} \
+            --enable-static --disable-shared --enable-pic --enable-small \
+            --disable-doc --disable-debug --disable-programs \
+            --disable-avdevice --disable-avfilter --disable-swscale \
+            --disable-postproc --disable-everything \
+            --enable-network --enable-zlib --enable-openssl \
+            --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
+              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
+              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
+              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
+              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
+              pcm_u32le,pcm_u32be,pcm_s8, \
+              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
+              eac3,mlp,wavpack,tta,cook,shorten,tak, \
+              mp1,mp1float,mp2,mp2float,mp3,mp3float \
+            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
+              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
+              image2,pcm_alaw,pcm_mulaw,flv \
+            --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+            --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+            --enable-muxer=null,wav --enable-encoder=pcm_s16le
+          make -j$(sysctl -n hw.logicalcpu) install
+
+      - name: Build libplacebo
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+            https://github.com/haasn/libplacebo.git
+          cd libplacebo
+          meson setup build \
+            -Ddefault_library=static -Dbuildtype=release \
+            -Ddemos=false -Dtests=false -Dbench=false \
+            -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+            --prefix ${{ env.PREFIX }}
+          meson install -C build
+
+      - name: Build libass
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+            https://github.com/libass/libass.git
+          cd libass
+          meson setup build \
+            -Ddefault_library=static -Dbuildtype=release \
+            -Dtests=false \
+            --prefix ${{ env.PREFIX }}
+          meson install -C build
+
+      - name: Build libmpv
+        run: |
+          cd mpv
+          meson setup build \
+            -Dcplayer=false -Dlibmpv=true \
+            -Ddefault_library=shared -Dbuildtype=release \
+            -Dbuild-date=false -Dgpl=false \
+            -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+            -Dlibcurl=enabled -Dcoreaudio=enabled \
+            -Dcocoa=disabled -Dswift-build=disabled \
+            -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
+            -Dmacos-touchbar=disabled \
+            -Dgl=disabled -Dvulkan=disabled \
+            -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled \
+            -Dios-gl=disabled \
+            -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+            -Dlibarchive=disabled -Drubberband=disabled \
+            -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+            -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
+            -Diconv=disabled -Dzlib=disabled \
+            -Dcaca=disabled \
+            -Dalsa=disabled -Dpulse=disabled -Dpipewire=disabled \
+            -Djack=disabled -Dopenal=disabled \
+            -Dsdl2-video=disabled -Dsdl2-audio=disabled \
+            -Dmanpage-build=disabled -Dtests=disabled \
+            -Dc_args='-ffunction-sections -fdata-sections' \
+            -Dc_link_args='-Wl,-dead_strip' \
+            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig
+          meson compile -C build
+          strip -S build/libmpv.dylib
+          ls -lh build/libmpv.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-macos-x86_64
+          path: mpv/build/libmpv.dylib

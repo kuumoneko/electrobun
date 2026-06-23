@@ -47,6 +47,7 @@ jobs:
             - name: Build shared ffmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
               run: |
+                  rm -rf ffmpeg
                   git clone --depth 1 --branch $FFMPEG_VERSION \
                     https://git.ffmpeg.org/ffmpeg.git ffmpeg
                   cd ffmpeg
@@ -93,6 +94,7 @@ jobs:
             - name: Build static ffmpeg
               if: steps.cache-ffmpeg-static.outputs.cache-hit != 'true'
               run: |
+                  rm -rf ffmpeg-static
                   git clone --depth 1 --branch $FFMPEG_VERSION \
                     https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static

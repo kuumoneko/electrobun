@@ -58,6 +58,7 @@ jobs:
                   MSYSTEM: UCRT64
               run: |
                   export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  rm -rf ffmpeg
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
                     https://git.ffmpeg.org/ffmpeg.git ffmpeg
                   cd ffmpeg
@@ -112,6 +113,7 @@ jobs:
               run: |
                   export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
                   pacman --noconfirm -S --needed make diffutils
+                  rm -rf ffmpeg-static
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
                     https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static

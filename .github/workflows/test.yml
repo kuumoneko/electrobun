@@ -117,7 +117,7 @@ jobs:
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
                     https://git.ffmpeg.org/ffmpeg.git ffmpeg
-                  cd ffmpeg
+                  cd libmpv/ffmpeg
                   ./configure \
                     --prefix=${{ env.PREFIX }} \
                     --enable-static --disable-shared --enable-pic --enable-small \

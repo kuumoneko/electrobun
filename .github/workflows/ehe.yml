@@ -148,7 +148,7 @@ jobs:
               if: steps.cache-mpv-ffmpeg.outputs.cache-hit != 'true'
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
-                  cd src/mpv/ffmpeg
+                  cd fmpeg-static
                   ./configure \
                     --prefix=${{ env.MPVPREFIX }} \
                     --enable-static --disable-shared --enable-pic --enable-small \
@@ -169,7 +169,7 @@ jobs:
               run: |
                   git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
                     https://github.com/haasn/libplacebo.git
-                  cd src/mpv/libplacebo
+                  cd libplacebo
                   git submodule update --init --depth 1
                   PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
                   meson setup build \
@@ -183,7 +183,7 @@ jobs:
               run: |
                   git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
                     https://github.com/libass/libass.git
-                  cd src/mpv/libass
+                  cd libass
                   PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \

@@ -98,6 +98,15 @@ jobs:
               if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
               shell: C:\msys64\usr\bin\bash.exe --login {0}
               run: |
+                  set -e
+                  echo "=== PATH ===" && echo "$PATH"
+                  echo "=== which git ===" && which git || echo "git not found"
+                  echo "=== which make ===" && which make || echo "make not found"
+                  echo "=== ls /ucrt64/bin/git* ===" && ls -la /ucrt64/bin/git* 2>/dev/null || echo "no git in /ucrt64/bin"
+                  echo "=== ls /usr/bin/make* ===" && ls -la /usr/bin/make* 2>/dev/null || echo "no make in /usr/bin"
+                  echo "=== pacman -Q ===" && pacman -Q mingw-w64-ucrt-x86_64-git make 2>/dev/null || echo "packages not found"
+                  pacman -S --noconfirm --needed \
+                    mingw-w64-ucrt-x86_64-git make
                   git clone --depth 1 --branch $FFMPEG_VERSION \
                     https://git.ffmpeg.org/ffmpeg.git ffmpeg
                   cd ffmpeg
@@ -120,8 +129,11 @@ jobs:
                   make -j$(nproc) install
 
             - name: Stage shared libraries
-              shell: C:\msys64\usr\bin\bash.exe --login {0}
+              shell: C:\msys64\usr\bin\bash.exe {0}
+              env:
+                  MSYSTEM: UCRT64
               run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
                   mkdir -p $STAGING
                   cp $PREFIX/bin/avutil-*.dll      $STAGING/
                   cp $PREFIX/bin/avformat-*.dll    $STAGING/

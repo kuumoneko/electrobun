@@ -79,7 +79,7 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dfribidi=disabled -Dharfbuzz=disabled -Dfontconfig=disabled \
+            -Dfontconfig=disabled \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 
@@ -146,6 +146,8 @@ jobs:
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-openssl
             mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-fribidi
+            mingw-w64-ucrt-x86_64-harfbuzz
 
       - name: Install git
         run: pacman --noconfirm -S --needed git
@@ -202,7 +204,7 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dfribidi=disabled -Dharfbuzz=disabled -Dfontconfig=disabled \
+            -Dfontconfig=disabled \
             --prefix $PREFIX
           meson install -C build
 
@@ -254,7 +256,8 @@ jobs:
         run: |
           brew update
           brew install meson ninja pkg-config nasm \
-            openssl@3 zlib curl vulkan-headers
+            openssl@3 zlib curl vulkan-headers \
+            fribidi harfbuzz
           pip3 install --break-system-packages jinja2
 
       - name: Cache ffmpeg
@@ -306,7 +309,7 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dfribidi=disabled -Dharfbuzz=disabled -Dfontconfig=disabled \
+            -Dfontconfig=disabled \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 

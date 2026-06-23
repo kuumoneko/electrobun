@@ -76,7 +76,6 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dtests=false \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 
@@ -135,14 +134,10 @@ jobs:
           update: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-g++
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-nasm
-            mingw-w64-ucrt-x86_64-curl
-            mingw-w64-ucrt-x86_64-libcurl
             mingw-w64-ucrt-x86_64-openssl
             mingw-w64-ucrt-x86_64-zlib
 
@@ -194,7 +189,6 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dtests=false \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 
@@ -207,7 +201,7 @@ jobs:
             -Ddefault_library=shared -Dbuildtype=release \
             -Dbuild-date=false -Dgpl=false \
             -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-            -Dlibcurl=enabled -Dwasapi=enabled -Dwin32-smtc=disabled \
+            -Dlibcurl=disabled -Dwasapi=enabled -Dwin32-smtc=disabled \
             -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
             -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
             -Dd3d11=disabled -Ddirect3d=disabled \
@@ -294,7 +288,6 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dtests=false \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 

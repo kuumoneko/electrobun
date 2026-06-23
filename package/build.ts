@@ -839,6 +839,26 @@ async function copyToDist() {
 		if (existsSync(join(process.cwd(), "src", "native", "build", "libNativeWrapper.so"))) {
 			await $`cp src/native/build/libNativeWrapper.so dist/libNativeWrapper.so`;
 		}
+
+		const smtcBuildPath = join(process.cwd(), "src", "smtc", "linux", "build");
+		if (existsSync(join(smtcBuildPath, "libsmtc.so"))) {
+			console.log("Copying native SMTC and FileDialog libraries to dist...");
+			await $`cp ${smtcBuildPath}/libsmtc.so dist/libsmtc.so`;
+			await $`cp ${smtcBuildPath}/libfiledialog.so dist/libfiledialog.so`;
+		} else {
+			console.warn("⚠️ Warning: Native SMTC/FileDialog binaries not found in build directory.");
+		}
+
+		const stagingPath = join(process.cwd(), "staging");
+		if (existsSync(stagingPath)) {
+			console.log("Copying staged FFmpeg shared libraries to dist...");
+			await $`cp ${stagingPath}/libavutil.so* dist/`;
+			await $`cp ${stagingPath}/libavformat.so* dist/`;
+			await $`cp ${stagingPath}/libavcodec.so* dist/`;
+			await $`cp ${stagingPath}/libswresample.so* dist/`;
+		} else {
+			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
+		}
 	}
 
 	await createPlatformDistFolder();

@@ -1,216 +1,215 @@
 name: Build FFmpeg shared libraries
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'ffmpeg/**'
+    workflow_run:
+        workflows: ["Build libmpv (audio-only)"]
+        types:
+            - completed
 
 env:
-  PREFIX: ${{ github.workspace }}/prefix
-  FFMPEG_VERSION: n7.1
-  STAGING: ${{ github.workspace }}/staging
+    PREFIX: ${{ github.workspace }}/prefix
+    FFMPEG_VERSION: n7.1
+    STAGING: ${{ github.workspace }}/staging
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install system deps
-        run: |
-          sudo apt update
-          sudo apt install -y nasm pkg-config
+    build-linux:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Install system deps
+              run: |
+                  sudo apt update
+                  sudo apt install -y nasm pkg-config
 
-      - name: Cache FFmpeg
-        id: cache-ffmpeg
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.PREFIX }}
-          key: ffmpeg-linux-x86_64-${{ env.FFMPEG_VERSION }}
+            - name: Cache FFmpeg
+              id: cache-ffmpeg
+              uses: actions/cache@v4
+              with:
+                  path: ${{ env.PREFIX }}
+                  key: ffmpeg-linux-x86_64-${{ env.FFMPEG_VERSION }}
 
-      - name: Build FFmpeg (shared, audio-only)
-        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
-            https://git.ffmpeg.org/ffmpeg.git ffmpeg
-          cd ffmpeg
-          ./configure \
-            --prefix=${{ env.PREFIX }} \
-            --enable-shared --disable-static --enable-pic --enable-small \
-            --disable-doc --disable-debug --disable-programs \
-            --disable-avdevice --disable-avfilter --disable-swscale \
-            --disable-postproc --disable-everything \
-            --enable-network --enable-zlib \
-            --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-              pcm_u32le,pcm_u32be,pcm_s8, \
-              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-              eac3,mlp,wavpack,tta,cook,shorten,tak, \
-              mp1,mp1float,mp2,mp2float,mp3,mp3float \
-            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-              image2,pcm_alaw,pcm_mulaw,flv \
-            --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
-            --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
-            --enable-muxer=mp4,mov,null,wav \
-            --enable-encoder=aac,pcm_s16le
-          make -j$(nproc) install
+            - name: Build FFmpeg (shared, audio-only)
+              if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure \
+                    --prefix=${{ env.PREFIX }} \
+                    --enable-shared --disable-static --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice --disable-avfilter --disable-swscale \
+                    --disable-postproc --disable-everything \
+                    --enable-network --enable-zlib \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
+                      vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
+                      pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
+                      pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
+                      pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
+                      pcm_u32le,pcm_u32be,pcm_s8, \
+                      dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
+                      eac3,mlp,wavpack,tta,cook,shorten,tak, \
+                      mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
+                      matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
+                      image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=mp4,mov,null,wav \
+                    --enable-encoder=aac,pcm_s16le
+                  make -j$(nproc) install
 
-      - name: Stage shared libraries
-        run: |
-          mkdir -p ${{ env.STAGING }}
-          cp ${{ env.PREFIX }}/lib/libavutil.so*   ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/libavformat.so* ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/libavcodec.so*  ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/libswresample.so* ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/pkgconfig/*.pc ${{ env.STAGING }}/
-          ls -lh ${{ env.STAGING }}/
+            - name: Stage shared libraries
+              run: |
+                  mkdir -p ${{ env.STAGING }}
+                  cp ${{ env.PREFIX }}/lib/libavutil.so*   ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/libavformat.so* ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/libavcodec.so*  ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/libswresample.so* ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/pkgconfig/*.pc ${{ env.STAGING }}/
+                  ls -lh ${{ env.STAGING }}/
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-shared-linux-x86_64
-          path: ${{ env.STAGING }}/*
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-shared-linux-x86_64
+                  path: ${{ env.STAGING }}/*
 
-  build-windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 -ucrt64 {0}
-    steps:
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            mingw-w64-ucrt-x86_64-{toolchain,nasm,pkgconf}
+    build-windows:
+        runs-on: windows-latest
+        defaults:
+            run:
+                shell: msys2 -ucrt64 {0}
+        steps:
+            - name: Setup MSYS2
+              uses: msys2/setup-msys2@v2
+              with:
+                  msystem: UCRT64
+                  update: true
+                  install: >-
+                      mingw-w64-ucrt-x86_64-{toolchain,nasm,pkgconf}
 
-      - name: Cache FFmpeg
-        id: cache-ffmpeg
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.PREFIX }}
-          key: ffmpeg-windows-x86_64-${{ env.FFMPEG_VERSION }}
+            - name: Cache FFmpeg
+              id: cache-ffmpeg
+              uses: actions/cache@v4
+              with:
+                  path: ${{ env.PREFIX }}
+                  key: ffmpeg-windows-x86_64-${{ env.FFMPEG_VERSION }}
 
-      - name: Build FFmpeg (shared, audio-only)
-        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
-            https://git.ffmpeg.org/ffmpeg.git ffmpeg
-          cd ffmpeg
-          ./configure \
-            --prefix=${{ env.PREFIX }} \
-            --arch=x86_64 --target-os=mingw32 \
-            --cross-prefix=x86_64-w64-mingw32- \
-            --enable-shared --disable-static --enable-pic --enable-small \
-            --disable-doc --disable-debug --disable-programs \
-            --disable-avdevice --disable-avfilter --disable-swscale \
-            --disable-postproc --disable-everything \
-            --enable-network --enable-zlib \
-            --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-              pcm_u32le,pcm_u32be,pcm_s8, \
-              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-              eac3,mlp,wavpack,tta,cook,shorten,tak, \
-              mp1,mp1float,mp2,mp2float,mp3,mp3float \
-            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-              image2,pcm_alaw,pcm_mulaw,flv \
-            --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
-            --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
-            --enable-muxer=mp4,mov,null,wav \
-            --enable-encoder=aac,pcm_s16le
-          make -j$(nproc) install
+            - name: Build FFmpeg (shared, audio-only)
+              if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure \
+                    --prefix=${{ env.PREFIX }} \
+                    --arch=x86_64 --target-os=mingw32 \
+                    --cross-prefix=x86_64-w64-mingw32- \
+                    --enable-shared --disable-static --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice --disable-avfilter --disable-swscale \
+                    --disable-postproc --disable-everything \
+                    --enable-network --enable-zlib \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
+                      vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
+                      pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
+                      pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
+                      pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
+                      pcm_u32le,pcm_u32be,pcm_s8, \
+                      dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
+                      eac3,mlp,wavpack,tta,cook,shorten,tak, \
+                      mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
+                      matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
+                      image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=mp4,mov,null,wav \
+                    --enable-encoder=aac,pcm_s16le
+                  make -j$(nproc) install
 
-      - name: Stage shared libraries
-        run: |
-          mkdir -p ${{ env.STAGING }}
-          cp ${{ env.PREFIX }}/bin/avutil-*.dll      ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/bin/avformat-*.dll    ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/bin/avcodec-*.dll     ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/bin/swresample-*.dll  ${{ env.STAGING }}/
-          # Also copy import libs (optional, for linking)
-          cp ${{ env.PREFIX }}/lib/avutil*.dll.a     ${{ env.STAGING }}/ 2>/dev/null || true
-          cp ${{ env.PREFIX }}/lib/avformat*.dll.a   ${{ env.STAGING }}/ 2>/dev/null || true
-          cp ${{ env.PREFIX }}/lib/avcodec*.dll.a    ${{ env.STAGING }}/ 2>/dev/null || true
-          cp ${{ env.PREFIX }}/lib/swresample*.dll.a ${{ env.STAGING }}/ 2>/dev/null || true
-          cp ${{ env.PREFIX }}/lib/pkgconfig/*.pc    ${{ env.STAGING }}/ 2>/dev/null || true
-          ls -lh ${{ env.STAGING }}/
+            - name: Stage shared libraries
+              run: |
+                  mkdir -p ${{ env.STAGING }}
+                  cp ${{ env.PREFIX }}/bin/avutil-*.dll      ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/bin/avformat-*.dll    ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/bin/avcodec-*.dll     ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/bin/swresample-*.dll  ${{ env.STAGING }}/
+                  # Also copy import libs (optional, for linking)
+                  cp ${{ env.PREFIX }}/lib/avutil*.dll.a     ${{ env.STAGING }}/ 2>/dev/null || true
+                  cp ${{ env.PREFIX }}/lib/avformat*.dll.a   ${{ env.STAGING }}/ 2>/dev/null || true
+                  cp ${{ env.PREFIX }}/lib/avcodec*.dll.a    ${{ env.STAGING }}/ 2>/dev/null || true
+                  cp ${{ env.PREFIX }}/lib/swresample*.dll.a ${{ env.STAGING }}/ 2>/dev/null || true
+                  cp ${{ env.PREFIX }}/lib/pkgconfig/*.pc    ${{ env.STAGING }}/ 2>/dev/null || true
+                  ls -lh ${{ env.STAGING }}/
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-shared-windows-x86_64
-          path: ${{ env.STAGING }}/*
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-shared-windows-x86_64
+                  path: ${{ env.STAGING }}/*
 
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - name: Install system deps
-        run: |
-          brew update
-          brew install nasm pkg-config
+    build-macos:
+        runs-on: macos-latest
+        steps:
+            - name: Install system deps
+              run: |
+                  brew update
+                  brew install nasm pkg-config
 
-      - name: Cache FFmpeg
-        id: cache-ffmpeg
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.PREFIX }}
-          key: ffmpeg-macos-x86_64-${{ env.FFMPEG_VERSION }}
+            - name: Cache FFmpeg
+              id: cache-ffmpeg
+              uses: actions/cache@v4
+              with:
+                  path: ${{ env.PREFIX }}
+                  key: ffmpeg-macos-x86_64-${{ env.FFMPEG_VERSION }}
 
-      - name: Build FFmpeg (shared, audio-only)
-        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
-            https://git.ffmpeg.org/ffmpeg.git ffmpeg
-          cd ffmpeg
-          ./configure \
-            --prefix=${{ env.PREFIX }} \
-            --enable-shared --disable-static --enable-pic --enable-small \
-            --disable-doc --disable-debug --disable-programs \
-            --disable-avdevice --disable-avfilter --disable-swscale \
-            --disable-postproc --disable-everything \
-            --enable-network --enable-zlib \
-            --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-              pcm_u32le,pcm_u32be,pcm_s8, \
-              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-              eac3,mlp,wavpack,tta,cook,shorten,tak, \
-              mp1,mp1float,mp2,mp2float,mp3,mp3float \
-            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-              image2,pcm_alaw,pcm_mulaw,flv \
-            --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
-            --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
-            --enable-muxer=mp4,mov,null,wav \
-            --enable-encoder=aac,pcm_s16le
-          make -j$(sysctl -n hw.logicalcpu) install
+            - name: Build FFmpeg (shared, audio-only)
+              if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure \
+                    --prefix=${{ env.PREFIX }} \
+                    --enable-shared --disable-static --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice --disable-avfilter --disable-swscale \
+                    --disable-postproc --disable-everything \
+                    --enable-network --enable-zlib \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
+                      vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
+                      pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
+                      pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
+                      pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
+                      pcm_u32le,pcm_u32be,pcm_s8, \
+                      dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
+                      eac3,mlp,wavpack,tta,cook,shorten,tak, \
+                      mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
+                      matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
+                      image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=mp4,mov,null,wav \
+                    --enable-encoder=aac,pcm_s16le
+                  make -j$(sysctl -n hw.logicalcpu) install
 
-      - name: Stage shared libraries
-        run: |
-          mkdir -p ${{ env.STAGING }}
-          cp ${{ env.PREFIX }}/lib/libavutil*.dylib   ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/libavformat*.dylib ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/libavcodec*.dylib  ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/libswresample*.dylib ${{ env.STAGING }}/
-          cp ${{ env.PREFIX }}/lib/pkgconfig/*.pc ${{ env.STAGING }}/
-          ls -lh ${{ env.STAGING }}/
+            - name: Stage shared libraries
+              run: |
+                  mkdir -p ${{ env.STAGING }}
+                  cp ${{ env.PREFIX }}/lib/libavutil*.dylib   ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/libavformat*.dylib ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/libavcodec*.dylib  ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/libswresample*.dylib ${{ env.STAGING }}/
+                  cp ${{ env.PREFIX }}/lib/pkgconfig/*.pc ${{ env.STAGING }}/
+                  ls -lh ${{ env.STAGING }}/
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-shared-macos-x86_64
-          path: ${{ env.STAGING }}/*
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-shared-macos-x86_64
+                  path: ${{ env.STAGING }}/*

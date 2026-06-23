@@ -1,5 +1,9 @@
 name: Build All Platforms
-on: [push, pull_request, workflow_dispatch]
+on:
+    workflow_run:
+        workflows: ["Build FFmpeg shared libraries"]
+        types:
+            - completed
 
 jobs:
     build-macos:

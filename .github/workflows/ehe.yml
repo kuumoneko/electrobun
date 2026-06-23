@@ -22,7 +22,7 @@ env:
 jobs:
     # Phase 1: Build the global shared FFmpeg libraries
     build-ffmpeg-shared:
-        runs-on: ubuntu-22.04
+        runs-on: ubuntu-latest
         steps:
             - name: Install System Utilities
               run: |
@@ -75,7 +75,7 @@ jobs:
 
     # Phase 2: Build Native SMTC and FileDialog C++ Bindings
     build-smtc-native:
-        runs-on: ubuntu-22.04
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
 
@@ -86,7 +86,7 @@ jobs:
 
             - name: Compile libsmtc and libfiledialog
               run: |
-                  cd smtc
+                  cd src/smtc
                   mkdir -p build
 
                   # Build SMTC Binding
@@ -114,7 +114,7 @@ jobs:
 
     # Phase 3: Build libmpv (Dependencies compiled statically, libmpv bundled shared)
     build-libmpv:
-        runs-on: ubuntu-22.04
+        runs-on: ubuntu-latest
         steps:
             - name: Checkout mpv Core
               uses: actions/checkout@v4

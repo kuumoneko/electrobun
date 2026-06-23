@@ -1,4 +1,4 @@
-name: Build FFmpeg shared libraries
+name: Build FFmpeg
 
 on:
     workflow_dispatch:

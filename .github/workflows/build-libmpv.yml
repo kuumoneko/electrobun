@@ -66,6 +66,7 @@ jobs:
             https://github.com/haasn/libplacebo.git
           cd libplacebo
           git submodule update --init --depth 1
+          PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
             -Ddemos=false -Dtests=false -Dbench=false \
@@ -78,6 +79,7 @@ jobs:
           git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
             https://github.com/libass/libass.git
           cd libass
+          PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
             -Dfontconfig=disabled -Drequire-system-font-provider=false \
@@ -87,7 +89,7 @@ jobs:
       - name: Build libmpv
         run: |
           cd mpv
-          PKG_CONFIG_PATH=${{ env.PREFIX }}/lib/pkgconfig \
+          PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
           meson setup build \
             -Dcplayer=false -Dlibmpv=true \
             -Ddefault_library=shared -Dbuildtype=release \
@@ -108,7 +110,7 @@ jobs:
             -Dcaca=disabled -Dsixel=disabled \
             -Dmanpage-build=disabled -Dtests=false \
             -Dc_args='-ffunction-sections -fdata-sections' \
-            -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed'
+             -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
           meson compile -C build
           strip build/libmpv.so
           ls -lh build/libmpv.so
@@ -233,7 +235,7 @@ jobs:
             -Dcaca=disabled \
             -Dmanpage-build=disabled -Dtests=false \
             -Dc_args='-ffunction-sections -fdata-sections' \
-            -Dc_link_args='-Wl,--gc-sections'
+             -Dc_link_args='-Wl,--gc-sections -lstdc++'
           meson compile -C build
           strip build/libmpv-2.dll
           ls -lh build/libmpv-2.dll
@@ -343,7 +345,7 @@ jobs:
             -Dsdl2-video=disabled -Dsdl2-audio=disabled \
             -Dmanpage-build=disabled -Dtests=false \
             -Dc_args='-ffunction-sections -fdata-sections' \
-            -Dc_link_args='-Wl,-dead_strip'
+             -Dc_link_args='-Wl,-dead_strip'
           meson compile -C build
           strip -S build/libmpv.dylib
           ls -lh build/libmpv.dylib

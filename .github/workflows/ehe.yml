@@ -24,6 +24,8 @@ jobs:
     build-ffmpeg-shared:
         runs-on: ubuntu-latest
         steps:
+            - uses: actions/checkout@v4
+
             - name: Install System Utilities
               run: |
                   sudo apt update
@@ -86,7 +88,7 @@ jobs:
 
             - name: Compile libsmtc and libfiledialog
               run: |
-                  cd src/smtc
+                  cd smtc
                   mkdir -p build
 
                   # Build SMTC Binding

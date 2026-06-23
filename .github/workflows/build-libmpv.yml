@@ -240,6 +240,7 @@ jobs:
           brew update
           brew install meson ninja pkg-config nasm \
             openssl@3 zlib curl
+          pip3 install jinja2
 
       - name: Cache ffmpeg
         id: cache-ffmpeg

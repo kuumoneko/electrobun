@@ -91,12 +91,12 @@ jobs:
 
             - name: Compile libsmtc and libfiledialog
               run: |
-                  cd src/smtc
+                  cd src/smtc/linux
                   mkdir -p build
 
                   # Build SMTC Binding
                   g++ -shared -fPIC -o build/libsmtc.so \
-                    -I. smtc_linux.cpp \
+                    -I. smtc.cpp \
                     $(pkg-config --cflags --libs dbus-1) \
                     -std=c++11 -O2 \
                     -Wl,-soname,libsmtc.so
@@ -104,7 +104,7 @@ jobs:
 
                   # Build File Dialog Binding
                   gcc -shared -fPIC -o build/libfiledialog.so \
-                    -I. filedialog_linux.cpp \
+                    -I. filedialog.cpp \
                     tinyfiledialogs/tinyfiledialogs.c \
                     -lX11 -O2 -D_GNU_SOURCE
                   strip build/libfiledialog.so

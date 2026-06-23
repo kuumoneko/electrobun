@@ -1,0 +1,269 @@
+name: Build Linux
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+env:
+    FFMPEG_VERSION: n7.1
+    MPV_VERSION: v0.39.0
+    LIBPLACEBO_VERSION: v7.349.0
+    LIBASS_VERSION: 0.17.3
+    ZIG_VERSION: 0.13.0
+    BSDIFF_VERSION: 0.1.19
+    ZSTD_VERSION: 0.1.3
+    ASAR_VERSION: 0.2.2
+    PREFIX: ${{ github.workspace }}/prefix
+    STAGING: ${{ github.workspace }}/staging
+    DECODERS: aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float
+    DEMUXERS: aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv
+    PARSERS: aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis
+    BSFS: aac_adtstoasc,extract_extradata,mp3_header_decompress
+    MUXERS: mp4,mov,null,wav
+    ENCODERS: aac,pcm_s16le
+
+jobs:
+    build-deps:
+        runs-on: ubuntu-22.04
+        defaults:
+            run:
+                working-directory: package
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Update machine
+              run: sudo apt update
+
+            - name: Cache shared ffmpeg
+              id: cache-ffmpeg-shared
+              uses: actions/cache@v4
+              with:
+                  path: ${{github.workspace}}/prefix-shared
+                  key: ffmpeg-shared-linux-x86_64-${{env.FFMPEG_VERSION}}
+            - name: Build shared ffmpeg
+              if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
+              run: |
+                  sudo apt install -y nasm pkg-config
+                  git clone --depth 1 --branch $FFMPEG_VERSION \
+                      https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                    cd ffmpeg
+                    ./configure \
+                      --prefix=$PREFIX \
+                      --enable-shared --disable-static --enable-pic --enable-small \
+                      --disable-doc --disable-debug --disable-programs \
+                      --disable-avdevice --disable-avfilter --disable-swscale \
+                      --disable-postproc --disable-everything \
+                      --enable-network --enable-zlib \
+                      --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                      --enable-decoder="$DECODERS" \
+                      --enable-demuxer="$DEMUXERS" \
+                      --enable-parser="$PARSERS" \
+                      --enable-bsf="$BSFS" \
+                      --enable-muxer="$MUXERS" \
+                      --enable-encoder="$ENCODERS"
+                    make -j$(nproc) install
+
+            - name: Stage shared libraries
+              if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
+              run: |
+                  mkdir -p $STAGING
+                  cp $PREFIX/lib/libavutil.so*   $STAGING/
+                  cp $PREFIX/lib/libavformat.so* $STAGING/
+                  cp $PREFIX/lib/libavcodec.so*  $STAGING/
+                  cp $PREFIX/lib/libswresample.so* $STAGING/
+                  cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
+                  ls -lh $STAGING/
+
+            - name: Upload shared ffmpeg
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-shared-linux-x86_64
+                  path: ${{github.workspace}}/ffmpeg-shared/*
+
+            - name: Cache libmpv
+              id: cache-libmpv
+              uses: actions/cache@v4
+              with:
+                  path: package/src/mpv/build
+                  key: libmpv-linux-${{ env.MPV_VERSION }}
+
+            - name: Checkout mpv
+              if: steps.cache-libmpv.outputs.cache-hit != 'true'
+              uses: actions/checkout@v4
+              with:
+                  repository: mpv-player/mpv
+                  ref: ${{ env.MPV_VERSION }}
+                  path: package/src/mpv
+
+            - name: Install system deps for libmpv
+              if: steps.cache-libmpv.outputs.cache-hit != 'true'
+              run: |
+                  sudo apt install -y meson ninja-build pkg-config nasm \
+                       libasound2-dev libcurl4-openssl-dev libvulkan-dev \
+                       libfreetype-dev libfribidi-dev libharfbuzz-dev \
+                       libfontconfig-dev
+
+            - name: Cache libmpv's ffmpeg
+              id: cache-libmpv-ffmpeg
+              uses: actions/cache@v4
+              with:
+                  path: package/src/mpv/ffmpeg
+                  key: libmpv-ffmpeg-linux-${{env.FFMPEG_VERSION}}
+
+            - name: Build libmpv ffmpeg
+              if: steps.cache-libmpv-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
+                    https://git.ffmpeg.org/ffmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure \
+                    --prefix=${{ env.PREFIX }} \
+                    --enable-static --disable-shared --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice \
+                    --disable-postproc --disable-everything \
+                    --enable-avfilter --enable-swscale \
+                    --enable-network --enable-zlib --enable-openssl \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+                    --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
+                    --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
+                    --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
+                    --enable-muxer=null,wav --enable-encoder=pcm_s16le
+                  make -j$(nproc) install
+
+            - name: Build libplacebo
+              if: steps.cache-libmpv-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+                    https://github.com/haasn/libplacebo.git
+                  cd libplacebo
+                  git submodule update --init --depth 1
+                  PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix ${{ env.PREFIX }}
+                  meson install -C build
+
+            - name: Build libass
+              if: steps.cache-libmpv-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+                    https://github.com/libass/libass.git
+                  cd libass
+                  PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled -Drequire-system-font-provider=false \
+                    --prefix ${{ env.PREFIX }}
+                  meson install -C build
+
+            - name: Build libmpv
+              if: steps.cache-libmpv-ffmpeg.outputs.cache-hit != 'true'
+              run: |
+                  cd mpv
+                  PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dalsa=enabled \
+                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+                    -Dx11=disabled -Dwayland=disabled -Ddrm=disabled -Dgbm=disabled \
+                    -Dvdpau=disabled -Dvaapi=disabled -Dcuda-hwaccel=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dpulse=disabled -Dpipewire=disabled -Djack=disabled \
+                    -Doss-audio=disabled -Dsndio=disabled -Dopenal=disabled \
+                    -Dsdl2-video=disabled -Dsdl2-audio=disabled -Dsdl2-gamepad=disabled \
+                    -Dcaca=disabled -Dsixel=disabled \
+                    -Dmanpage-build=disabled -Dtests=false \
+                    -Dc_args='-ffunction-sections -fdata-sections' \
+                     -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed -lstdc++'
+                  meson compile -C build
+                  strip build/libmpv.so
+                  ls -lh build/libmpv.so
+
+            - name: Cache linux SMTC
+              id: cache-smtc
+              uses: actions/cache@v4
+              with:
+                  path: /package/src/smtc/linux/build
+                  key: smtc-linux-x86_64
+
+            - name: Install linux smtc deps
+              if: steps.cache-smtc.outputs.cache-hit != 'true'
+              run: |
+                  sudo apt install -y libdbus-1-dev libx11-devdo
+
+            - name: Build libsmtc.so
+              if: steps.cache-smtc.outputs.cache-hit != 'true'
+              run: |
+                  cd src/smtc/linux
+                  g++ -shared -fPIC -o build/libsmtc.so \
+                      -I. smtc_linux.cpp \
+                      $(pkg-config --cflags --libs dbus-1) \
+                      -std=c++11 -O2 \
+                      -Wl,-soname,libsmtc.so
+                  strip build/libsmtc.so
+            - name: Build libfiledialog.so
+              if: steps.cache-smtc.outputs.cache-hit != 'true'
+              run: |
+                  cd src/smtc/linux
+                  gcc -shared -fPIC -o build/libfiledialog.so \
+                    -I. filedialog_linux.cpp \
+                    tinyfiledialogs/tinyfiledialogs.c \
+                    -lX11 -O2 -D_GNU_SOURCE
+                  strip build/libfiledialog.so
+
+            - name: Checkout electrobun build
+              uses: actions/checkout@v4
+
+            - name: Electrobun deps cache
+              id: cache-electrobun-deps
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/apt/archives
+                  key: ${{runner.os}}-apt-${{hashFiles('**/package.json')}}
+                  restore-keys: ${{runner.os}}-apt-linux-x86_64
+
+            - name: install electrobun deps
+              if: steps.cache-electrobun-deps.outputs.cache-hit != 'true'
+              run: |
+                  sudo apt-get install -y build-essential cmake pkg-config libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev libharfbuzz-dev
+
+            - name: Bun cache
+              id: cache-bun
+              uses: actions/cache@v4
+              with:
+                  path: ~/.bun/install/cache
+                  key: ${{runner.os}}-bun-${{hashFiles('package/bun.lockb', 'package/package.json')}}
+                  restore-keys: ${{runner.os}}-bun-linux-x86_64
+
+            - name: setup Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - name: install bun deps
+              if: steps.cache-bun.outputs.cache-hit != 'true'
+              run: bun install
+
+            - name: Script Binary Cache
+              uses: actions/cache@v4
+              with:
+                  path: ${{github.workspace}}/package/vendors/binaries
+                  key: ${{runner.os}}-script-deps-${{hashFiles('package/build.ts')}}
+                  restore-keys: ${{runner.os}}-script-deps-linux-x86_64
+
+            - name: run Build
+              env:
+                  PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+              run: bun build.ts --release

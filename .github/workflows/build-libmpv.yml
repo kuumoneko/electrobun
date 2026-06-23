@@ -50,18 +50,8 @@ jobs:
             --disable-postproc --disable-everything \
             --enable-network --enable-zlib --enable-openssl \
             --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-              pcm_u32le,pcm_u32be,pcm_s8, \
-              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-              eac3,mlp,wavpack,tta,cook,shorten,tak, \
-              mp1,mp1float,mp2,mp2float,mp3,mp3float \
-            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-              image2,pcm_alaw,pcm_mulaw,flv \
+            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
             --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
             --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
             --enable-muxer=null,wav --enable-encoder=pcm_s16le
@@ -93,6 +83,7 @@ jobs:
       - name: Build libmpv
         run: |
           cd mpv
+          PKG_CONFIG_PATH=${{ env.PREFIX }}/lib/pkgconfig \
           meson setup build \
             -Dcplayer=false -Dlibmpv=true \
             -Ddefault_library=shared -Dbuildtype=release \
@@ -113,8 +104,7 @@ jobs:
             -Dcaca=disabled -Dsixel=disabled \
             -Dmanpage-build=disabled -Dtests=disabled \
             -Dc_args='-ffunction-sections -fdata-sections' \
-            -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed' \
-            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig
+            -Dc_link_args='-Wl,--gc-sections -Wl,--as-needed'
           meson compile -C build
           strip build/libmpv.so
           ls -lh build/libmpv.so
@@ -144,8 +134,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-{toolchain,meson,ninja,pkgconf,cmake,
-            nasm,curl,libcurl,openssl,zlib}
+            mingw-w64-ucrt-x86_64-{toolchain,meson,ninja,pkgconf,cmake,nasm,curl,libcurl,openssl,zlib}
 
       - name: Cache ffmpeg
         id: cache-ffmpeg
@@ -162,26 +151,14 @@ jobs:
           cd ffmpeg
           ./configure \
             --prefix=${{ env.PREFIX }} \
-            --arch=x86_64 --target-os=mingw32 \
-            --cross-prefix=x86_64-w64-mingw32- \
             --enable-static --disable-shared --enable-pic --enable-small \
             --disable-doc --disable-debug --disable-programs \
             --disable-avdevice --disable-avfilter --disable-swscale \
             --disable-postproc --disable-everything \
             --enable-network --enable-zlib --enable-openssl \
             --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-              pcm_u32le,pcm_u32be,pcm_s8, \
-              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-              eac3,mlp,wavpack,tta,cook,shorten,tak, \
-              mp1,mp1float,mp2,mp2float,mp3,mp3float \
-            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-              image2,pcm_alaw,pcm_mulaw,flv \
+            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
             --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
             --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
             --enable-muxer=null,wav --enable-encoder=pcm_s16le
@@ -213,6 +190,7 @@ jobs:
       - name: Build libmpv
         run: |
           cd mpv
+          PKG_CONFIG_PATH=${{ env.PREFIX }}/lib/pkgconfig \
           meson setup build \
             -Dcplayer=false -Dlibmpv=true \
             -Ddefault_library=shared -Dbuildtype=release \
@@ -231,10 +209,9 @@ jobs:
             -Dcaca=disabled \
             -Dmanpage-build=disabled -Dtests=disabled \
             -Dc_args='-ffunction-sections -fdata-sections' \
-            -Dc_link_args='-Wl,--gc-sections' \
-            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig
+            -Dc_link_args='-Wl,--gc-sections'
           meson compile -C build
-          x86_64-w64-mingw32-strip build/libmpv-2.dll
+          strip build/libmpv-2.dll
           ls -lh build/libmpv-2.dll
 
       - name: Upload artifact
@@ -280,18 +257,8 @@ jobs:
             --disable-postproc --disable-everything \
             --enable-network --enable-zlib --enable-openssl \
             --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus, \
-              vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice, \
-              pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le, \
-              pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be, \
-              pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be, \
-              pcm_u32le,pcm_u32be,pcm_s8, \
-              dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar, \
-              eac3,mlp,wavpack,tta,cook,shorten,tak, \
-              mp1,mp1float,mp2,mp2float,mp3,mp3float \
-            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac, \
-              matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta, \
-              image2,pcm_alaw,pcm_mulaw,flv \
+            --enable-decoder=aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float \
+            --enable-demuxer=aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv \
             --enable-parser=aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis \
             --enable-bsf=aac_adtstoasc,extract_extradata,mp3_header_decompress \
             --enable-muxer=null,wav --enable-encoder=pcm_s16le
@@ -323,6 +290,7 @@ jobs:
       - name: Build libmpv
         run: |
           cd mpv
+          PKG_CONFIG_PATH=${{ env.PREFIX }}/lib/pkgconfig \
           meson setup build \
             -Dcplayer=false -Dlibmpv=true \
             -Ddefault_library=shared -Dbuildtype=release \
@@ -346,8 +314,7 @@ jobs:
             -Dsdl2-video=disabled -Dsdl2-audio=disabled \
             -Dmanpage-build=disabled -Dtests=disabled \
             -Dc_args='-ffunction-sections -fdata-sections' \
-            -Dc_link_args='-Wl,-dead_strip' \
-            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig
+            -Dc_link_args='-Wl,-dead_strip'
           meson compile -C build
           strip -S build/libmpv.dylib
           ls -lh build/libmpv.dylib

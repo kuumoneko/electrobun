@@ -82,8 +82,10 @@ jobs:
                   update: true
                   install: >-
                       mingw-w64-ucrt-x86_64-gcc
+                      mingw-w64-ucrt-x86_64-git
                       mingw-w64-ucrt-x86_64-nasm
                       mingw-w64-ucrt-x86_64-pkgconf
+                      make
 
             - name: Cache FFmpeg
               id: cache-ffmpeg

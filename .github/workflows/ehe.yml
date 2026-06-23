@@ -193,7 +193,7 @@ jobs:
 
             - name: Build libmpv (Shared)
               run: |
-                  cd src/mpv
+                  cd mpv
                   PKG_CONFIG_PATH="${{ env.MPVPREFIX }}/lib/pkgconfig:${{ env.MPVPREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
                   meson setup build \
                     -Dcplayer=false -Dlibmpv=true \

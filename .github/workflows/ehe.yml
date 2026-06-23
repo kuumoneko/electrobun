@@ -121,9 +121,6 @@ jobs:
     # Phase 3: Build libmpv (Dependencies compiled statically, libmpv bundled shared)
     build-libmpv:
         runs-on: ubuntu-latest
-        defaults:
-            run:
-                working-directory: package
         steps:
             - name: Checkout mpv Core
               uses: actions/checkout@v4

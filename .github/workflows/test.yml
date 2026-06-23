@@ -39,7 +39,7 @@ jobs:
               id: cache-ffmpeg-shared
               uses: actions/cache@v4
               with:
-                  path: ${{github.workspace}}/prefix-shared
+                  path: ${{ env.PREFIX }}
                   key: ffmpeg-shared-linux-x86_64-${{env.FFMPEG_VERSION}}
             - name: Build shared ffmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
@@ -80,7 +80,7 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: ffmpeg-shared-linux-x86_64
-                  path: ${{github.workspace}}/ffmpeg-shared/*
+                  path: ${{ env.STAGING }}/*
 
             - name: Cache libmpv
               id: cache-libmpv
@@ -165,7 +165,7 @@ jobs:
             - name: Build libmpv
               if: steps.cache-libmpv-ffmpeg.outputs.cache-hit != 'true'
               run: |
-                  cd mpv
+                  cd src/mpv
                   PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig:${{ env.PREFIX }}/lib/x86_64-linux-gnu/pkgconfig" \
                   meson setup build \
                     -Dcplayer=false -Dlibmpv=true \
@@ -202,12 +202,13 @@ jobs:
             - name: Install linux smtc deps
               if: steps.cache-smtc.outputs.cache-hit != 'true'
               run: |
-                  sudo apt install -y libdbus-1-dev libx11-devdo
+                  sudo apt install -y libdbus-1-dev libx11-dev
 
             - name: Build libsmtc.so
               if: steps.cache-smtc.outputs.cache-hit != 'true'
               run: |
                   cd src/smtc/linux
+                  mkdir -p build
                   g++ -shared -fPIC -o build/libsmtc.so \
                       -I. smtc_linux.cpp \
                       $(pkg-config --cflags --libs dbus-1) \
@@ -218,6 +219,7 @@ jobs:
               if: steps.cache-smtc.outputs.cache-hit != 'true'
               run: |
                   cd src/smtc/linux
+                  mkdir -p build
                   gcc -shared -fPIC -o build/libfiledialog.so \
                     -I. filedialog_linux.cpp \
                     tinyfiledialogs/tinyfiledialogs.c \

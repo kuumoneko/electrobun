@@ -852,10 +852,10 @@ async function copyToDist() {
 		const stagingPath = join(process.cwd(), "..", "staging");
 		if (existsSync(stagingPath)) {
 			console.log("Copying staged FFmpeg shared libraries to dist...");
-			await $`cp ${stagingPath}/libavutil.so* dist/`;
-			await $`cp ${stagingPath}/libavformat.so* dist/`;
-			await $`cp ${stagingPath}/libavcodec.so* dist/`;
-			await $`cp ${stagingPath}/libswresample.so* dist/`;
+			await $`cp ${stagingPath}/libavutil.so dist/`;
+			await $`cp ${stagingPath}/libavformat.so dist/`;
+			await $`cp ${stagingPath}/libavcodec.so dist/`;
+			await $`cp ${stagingPath}/libswresample.so dist/`;
 		} else {
 			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
 		}

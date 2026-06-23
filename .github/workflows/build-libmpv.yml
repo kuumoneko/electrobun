@@ -79,7 +79,7 @@ jobs:
           cd libass
           meson setup build \
             -Ddefault_library=static -Dbuildtype=release \
-            -Dfontconfig=disabled \
+            -Dfontconfig=disabled -Drequire-system-font-provider=false \
             --prefix ${{ env.PREFIX }}
           meson install -C build
 
@@ -222,11 +222,11 @@ jobs:
             -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
             -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
             -Dd3d11=disabled -Ddirect3d=disabled \
-            -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled -Damf=disabled \
+            -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled \
             -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
             -Dlibarchive=disabled -Drubberband=disabled \
             -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
-            -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
+            -Duchardet=disabled -Dvapoursynth=disabled \
             -Diconv=disabled -Dzlib=disabled \
             -Dcaca=disabled \
             -Dmanpage-build=disabled -Dtests=false \
@@ -332,7 +332,7 @@ jobs:
             -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
             -Dlibarchive=disabled -Drubberband=disabled \
             -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
-            -Duchardet=disabled -Dsubrandr=disabled -Dvapoursynth=disabled \
+            -Duchardet=disabled -Dvapoursynth=disabled \
             -Diconv=disabled -Dzlib=disabled \
             -Dcaca=disabled \
             -Dalsa=disabled -Dpulse=disabled -Dpipewire=disabled \

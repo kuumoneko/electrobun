@@ -865,11 +865,11 @@ async function copyToDist() {
 		})
 		if (existsSync(stagingPath)) {
 			console.log("Copying staged FFmpeg shared libraries to dist...");
-			await $`cp ${stagingPath}/libavutil-60${libExt} dist/`;
-			await $`cp ${stagingPath}/libavformat-62${libExt} dist/`;
-			await $`cp ${stagingPath}/libavcodec-62${libExt} dist/`;
+			await $`cp ${stagingPath}/avutil-60${libExt} dist/`;
+			await $`cp ${stagingPath}/avformat-62${libExt} dist/`;
+			await $`cp ${stagingPath}/avcodec-62${libExt} dist/`;
 			await $`cp ${stagingPath}/libssp-0${libExt} dist/`;
-			await $`cp ${stagingPath}/libswresample-6${libExt} dist/`;
+			await $`cp ${stagingPath}/swresample-6${libExt} dist/`;
 		} else {
 			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
 		}

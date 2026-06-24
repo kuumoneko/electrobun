@@ -486,7 +486,7 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ${{ env.PREFIX }}
-                  key: ffmpeg-shared-windows-x86_64-${{ env.FFMPEG_VERSION }}
+                  key: ffmpeg-shared-windows-x86_64-${{ env.FFMPEG_VERSION }}-test
 
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'

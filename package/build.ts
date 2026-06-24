@@ -728,9 +728,9 @@ async function buildLauncher() {
 	if (isNewer(launcherLib, launcherOut)) {
 		console.log("Launcher is changed! Building...");
 		if (CHANNEL === "debug") {
-			await $`cd src/launcher && ../../vendors/zig/zig build ${zigArgs}`;
+			await $`cd src/launcher && ../../vendors/zig/zig build ${zigArgs.join(" ")}`;
 		} else {
-			await $`cd src/launcher && ../../vendors/zig/zig build -Doptimize=ReleaseSmall ${zigArgs}`;
+			await $`cd src/launcher && ../../vendors/zig/zig build -Doptimize=ReleaseSmall ${zigArgs.join(" ")}`;
 		}
 	} else {
 		console.log("Launcher is unchanged! Skipping...");

@@ -719,7 +719,7 @@ async function buildLauncher() {
 	} else if (OS === "linux") {
 		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-linux"] : ["-Dtarget=x86_64-linux"];
 	} else if (OS === "macos") {
-		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-macos", "-Dtarget=native-native-msvc"] : ["-Dtarget=x86_64-macos", "-Dtarget=native-native-msvc"];
+		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-macos"] : ["-Dtarget=x86_64-macos"];
 	}
 
 	const launcherLib = "./src/launcher/main.zig";
@@ -728,9 +728,9 @@ async function buildLauncher() {
 	if (isNewer(launcherLib, launcherOut)) {
 		console.log("Launcher is changed! Building...");
 		if (CHANNEL === "debug") {
-			await $`cd src/launcher && ../../vendors/zig/zig build ${zigArgs.join(" ")}`;
+			await $`cd src/launcher && ../../vendors/zig/zig build ${zigArgs}`;
 		} else {
-			await $`cd src/launcher && ../../vendors/zig/zig build -Doptimize=ReleaseSmall ${zigArgs.join(" ")}`;
+			await $`cd src/launcher && ../../vendors/zig/zig build -Doptimize=ReleaseSmall ${zigArgs}`;
 		}
 	} else {
 		console.log("Launcher is unchanged! Skipping...");

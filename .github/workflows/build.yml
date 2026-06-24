@@ -238,7 +238,6 @@ jobs:
                   if-no-files-found: error
 
     build-macos:
-        needs: build-linux
         runs-on: macos-latest
         steps:
             # ==========================================
@@ -452,7 +451,6 @@ jobs:
                   if-no-files-found: error
 
     build-windows:
-        needs: build-macos
         runs-on: windows-latest
         steps:
             # ==========================================

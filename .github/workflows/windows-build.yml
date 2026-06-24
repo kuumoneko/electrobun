@@ -1,4 +1,4 @@
-name: Consolidated macOS Build Pipeline (Single Job)
+name: Consolidated Windows Build Pipeline (Single Job)
 
 on:
     push:
@@ -19,10 +19,11 @@ env:
     BSFS: aac_adtstoasc,extract_extradata,mp3_header_decompress
     MUXERS: mp4,mov,null,wav
     ENCODERS: aac,pcm_s16le
+    MSYSTEM: UCRT64
 
 jobs:
-    build-all-macos:
-        runs-on: macos-latest
+    build-all-windows:
+        runs-on: windows-latest
         steps:
             # ==========================================
             # INITIALIZATION & SYSTEM DEPS
@@ -30,22 +31,24 @@ jobs:
             - name: Checkout Repository
               uses: actions/checkout@v4
 
-            - name: Setup Homebrew Cache
-              uses: actions/cache@v4
+            - name: Setup MSYS2 Environment
+              uses: msys2/setup-msys2@v2
               with:
-                  path: |
-                      ~/Library/Caches/Homebrew
-                      /usr/local/Homebrew
-                  key: ${{ runner.os }}-brew-${{ hashFiles('**/package.json') }}
-                  restore-keys: ${{ runner.os }}-brew-
-
-            - name: Install System Compilation Tools
-              run: |
-                  brew update
-                  brew install meson ninja pkg-config nasm cmake \
-                    openssl@3 zlib curl vulkan-headers \
-                    fribidi harfbuzz
-                  pip3 install --break-system-packages jinja2
+                  msystem: UCRT64
+                  update: true
+                  install: >-
+                      mingw-w64-ucrt-x86_64-toolchain
+                      mingw-w64-ucrt-x86_64-meson
+                      mingw-w64-ucrt-x86_64-ninja
+                      mingw-w64-ucrt-x86_64-pkgconf
+                      mingw-w64-ucrt-x86_64-nasm
+                      mingw-w64-ucrt-x86_64-openssl
+                      mingw-w64-ucrt-x86_64-zlib
+                      mingw-w64-ucrt-x86_64-fribidi
+                      mingw-w64-ucrt-x86_64-harfbuzz
+                      make
+                      diffutils
+                      git
 
             # ==========================================
             # STEP 1: BUILD SHARED FFMPEG
@@ -55,15 +58,19 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ${{ env.PREFIX }}
-                  key: ffmpeg-shared-macos-x86_64-${{ env.FFMPEG_VERSION }}
+                  key: ffmpeg-shared-windows-x86_64-${{ env.FFMPEG_VERSION }}
 
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
+              shell: C:\msys64\usr\bin\bash.exe {0}
               run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
+                  export PKG_CONFIG_PATH="/ucrt64/lib/pkgconfig"
                   git clone --depth 1 --branch $FFMPEG_VERSION https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
                   cd ffmpeg-src
                   ./configure \
                     --prefix=$PREFIX \
+                    --arch=x86_64 --target-os=mingw32 \
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
@@ -76,36 +83,37 @@ jobs:
                     --enable-bsf="$BSFS" \
                     --enable-muxer="$MUXERS" \
                     --enable-encoder="$ENCODERS"
-                  make -j$(sysctl -n hw.logicalcpu)
+                  make -j$(nproc)
                   make install
 
             - name: Stage Shared Libraries (Direct to Workspace)
+              shell: C:\msys64\usr\bin\bash.exe {0}
               run: |
+                  export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
                   mkdir -p $STAGING
-                  cp $PREFIX/lib/libavutil*.dylib $STAGING/
-                  cp $PREFIX/lib/libavformat*.dylib $STAGING/
-                  cp $PREFIX/lib/libavcodec*.dylib $STAGING/
-                  cp $PREFIX/lib/libswresample*.dylib $STAGING/
-                  cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
+                  find "$PREFIX" -name "avutil-*.dll" -exec cp {} $STAGING/ \;
+                  find "$PREFIX" -name "avformat-*.dll" -exec cp {} $STAGING/ \;
+                  find "$PREFIX" -name "avcodec-*.dll" -exec cp {} $STAGING/ \;
+                  find "$PREFIX" -name "swresample-*.dll" -exec cp {} $STAGING/ \;
+                  find "$PREFIX" -name "*.pc" -exec cp {} $STAGING/ \; 2>/dev/null || true
                   ls -lh $STAGING/
 
             # ==========================================
-            # STEP 2: BUILD NATIVE SMTC & FILEDIALOG
+            # STEP 2: BUILD NATIVE SMTC & FILEDIALOG (MSVC)
             # ==========================================
-            - name: Compile Native Obj-C++ Bindings
+            - name: Setup MSVC Toolchain
+              uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Compile Native C++ Bindings (MSVC)
+              shell: cmd
               run: |
-                  cd smtc
-                  mkdir -p build
+                  cd package\src\smtc\win
+                  if not exist build mkdir build
+                  cd build
 
-                  clang++ -shared -fPIC -o build/libsmtc.dylib smtc_macos.mm \
-                    -framework MediaPlayer -framework AppKit -framework Cocoa \
-                    -std=c++11 -O2 -ObjC++
-                  strip -S build/libsmtc.dylib
-
-                  clang++ -shared -fPIC -o build/libfiledialog.dylib filedialog_macos.mm \
-                    -framework AppKit -framework Cocoa \
-                    -std=c++11 -O2 -ObjC++
-                  strip -S build/libfiledialog.dylib
+                  cl /nologo /LD /EHsc /std:c++17 /O2 ..\smtc.cpp /link /out:smtc.dll windowsapp.lib
+                  cl /nologo /LD /EHsc /std:c++17 /O2 ..\filedialog.cpp /link /out:filedialog.dll ole32.lib shell32.lib
+                  cl /nologo /LD /EHsc /std:c++17 /O2 ..\aumid.cpp /link /out:aumid.dll ole32.lib shell32.lib
 
             # ==========================================
             # STEP 3: BUILD LIBMPV & DEPENDENCIES
@@ -122,82 +130,94 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ${{ env.MPVPREFIX }}
-                  key: ffmpeg-static-audio-macos-${{ env.FFMPEG_VERSION }}
+                  key: ffmpeg-static-audio-windows-${{ env.FFMPEG_VERSION }}
 
             - name: Build Static Audio-Only FFmpeg
               if: steps.cache-mpv-ffmpeg.outputs.cache-hit != 'true'
+              shell: msys2 {0}
               run: |
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.MPVPREFIX }}')"
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static
-                  export PKG_CONFIG_PATH="$(brew --prefix zlib)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH"
                   ./configure \
-                    --prefix=${{ env.MPVPREFIX }} \
+                    --prefix=$MPVPREFIX_PATH \
+                    --arch=x86_64 --target-os=mingw32 \
                     --enable-static --disable-shared --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-postproc --disable-everything \
                     --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
-                  make -j$(sysctl -n hw.logicalcpu) install
+                  make -j$(nproc) install
 
             - name: Build Dependency - libplacebo (Static)
+              shell: msys2 {0}
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
-                    https://github.com/haasn/libplacebo.git
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.MPVPREFIX }}')"
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
                   cd libplacebo
                   git submodule update --init --depth 1
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Ddemos=false -Dtests=false -Dbench=false \
                     -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
-                    --prefix ${{ env.MPVPREFIX }}
+                    --prefix $MPVPREFIX_PATH
                   meson install -C build
 
             - name: Build Dependency - libass (Static)
+              shell: msys2 {0}
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
-                    https://github.com/libass/libass.git
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.MPVPREFIX }}')"
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
                   cd libass
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Dfontconfig=disabled \
-                    --prefix ${{ env.MPVPREFIX }}
+                    --prefix $MPVPREFIX_PATH
                   meson install -C build
 
             - name: Build libmpv (Shared)
+              shell: msys2 {0}
               run: |
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.MPVPREFIX }}')"
                   cd package/src/mpv
-                  PKG_CONFIG_PATH=${{ env.MPVPREFIX }}/lib/pkgconfig \
+                  PKG_CONFIG_PATH=$MPVPREFIX_PATH/lib/pkgconfig \
                   meson setup build \
                     -Dcplayer=false -Dlibmpv=true \
                     -Ddefault_library=shared -Dbuildtype=release \
                     -Dbuild-date=false -Dgpl=false \
                     -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-                    -Dcoreaudio=enabled \
-                    -Dcocoa=disabled -Dswift-build=disabled \
-                    -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
-                    -Dmacos-touchbar=disabled \
-                    -Dgl=disabled -Dvulkan=disabled \
-                    -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled \
-                    -Dios-gl=disabled \
+                    -Dwasapi=enabled -Dwin32-smtc=disabled \
+                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+                    -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
+                    -Dd3d11=disabled -Ddirect3d=disabled \
+                    -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled \
                     -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
                     -Dlibarchive=disabled -Drubberband=disabled \
                     -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
                     -Duchardet=disabled -Dvapoursynth=disabled \
                     -Diconv=disabled -Dzlib=disabled \
-                    -Dalsa=disabled -Dpulse=disabled -Dpipewire=disabled \
-                    -Djack=disabled -Dopenal=disabled \
-                    -Dsdl2-video=disabled -Dsdl2-audio=disabled \
+                    -Dcaca=disabled \
                     -Dmanpage-build=disabled -Dtests=false \
                     -Dc_args='-ffunction-sections -fdata-sections' \
-                     -Dc_link_args='-Wl,-dead_strip'
+                     -Dc_link_args='-Wl,--gc-sections -lstdc++'
                   meson compile -C build
-                  strip -S build/libmpv.dylib
-                  ls -lh build/libmpv.dylib
+                  strip build/libmpv-2.dll
+                  ls -lh build/libmpv-2.dll
+                  cp build/libmpv-2.dll build/libmpv.dll
 
             # ==========================================
             # STEP 4: COMPILE ELECTROBUN APPLICATION
             # ==========================================
+            - name: Setup NuGet Cache
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.nuget/packages
+                      ${{ github.workspace }}/package/vendors/webview2
+                  key: ${{ runner.os }}-nuget-${{ hashFiles('**/package.json') }}
+                  restore-keys: ${{ runner.os }}-nuget-
+
             - name: Setup Bun Cache
               uses: actions/cache@v4
               with:
@@ -218,7 +238,7 @@ jobs:
             - name: Setup Custom Script Toolchain Cache
               uses: actions/cache@v4
               with:
-                  path: ${{ github.workspace }}/package/vendors/binaries
+                  path: package/vendors
                   key: ${{ runner.os }}-script-deps-${{ hashFiles('package/build.ts') }}
                   restore-keys: ${{ runner.os }}-script-deps-
 
@@ -230,6 +250,6 @@ jobs:
             - name: Upload Completed Package Folder
               uses: actions/upload-artifact@v4
               with:
-                  name: electrobun-macos-x86_64
-                  path: package/dist-macos-x64/
+                  name: electrobun-windows-x86_64
+                  path: package/dist-win-x64/
                   if-no-files-found: error

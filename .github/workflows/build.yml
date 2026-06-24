@@ -51,7 +51,7 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ${{ env.PREFIX }}
-                  key: ffmpeg-shared-linux-x86_64-${{ env.FFMPEG_VERSION }}
+                  key: ffmpeg-shared-linux-x86_64-${{ env.FFMPEG_VERSION }}-test
 
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
@@ -64,7 +64,7 @@ jobs:
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \
-      
+
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \

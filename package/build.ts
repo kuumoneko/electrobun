@@ -850,9 +850,9 @@ async function copyToDist() {
 	} else if (OS === "win") {
 		await $`cp src/native/win/build/libNativeWrapper.dll dist/libNativeWrapper.dll`;
 		await $`cp vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2Loader.dll dist/WebView2Loader.dll`;
-		await $`cp smtc/build/smtc.dll dist/smtc.dll`;
-		await $`cp smtc/build/aumid.dll dist/aumid.dll`;
-		await $`cp smtc/build/filedialog.dll dist/filedialog.dll`;
+		await $`cp smtc/win/build/smtc.dll dist/smtc.dll`;
+		await $`cp smtc/win/build/aumid.dll dist/aumid.dll`;
+		await $`cp smtc/win/build/filedialog.dll dist/filedialog.dll`;
 		await $`cp ffmpeg/avformat-62.dll dist/avformat-62.dll`;
 		await $`cp ffmpeg/avcodec-62.dll dist/avcodec-62.dll`;
 		await $`cp ffmpeg/avutil-60.dll dist/avutil-60.dll`;

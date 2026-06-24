@@ -97,12 +97,12 @@ jobs:
                   cd package/src/smtc/macos
                   mkdir -p build
 
-                  clang++ -shared -fPIC -o build/libsmtc.dylib smtc_macos.mm \
+                  clang++ -shared -fPIC -o build/libsmtc.dylib smtc.mm \
                     -framework MediaPlayer -framework AppKit -framework Cocoa \
                     -std=c++11 -O2 -ObjC++
                   strip -S build/libsmtc.dylib
 
-                  clang++ -shared -fPIC -o build/libfiledialog.dylib filedialog_macos.mm \
+                  clang++ -shared -fPIC -o build/libfiledialog.dylib filedialog.mm \
                     -framework AppKit -framework Cocoa \
                     -std=c++11 -O2 -ObjC++
                   strip -S build/libfiledialog.dylib

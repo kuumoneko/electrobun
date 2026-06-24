@@ -50,16 +50,16 @@ jobs:
 
             - name: Build libsmtc.dylib
               run: |
-                  cd smtc
-                  clang++ -shared -fPIC -o libsmtc.dylib smtc_macos.mm \
+                  cd package/src/smtc/macos
+                  clang++ -shared -fPIC -o libsmtc.dylib smtc.mm \
                     -framework MediaPlayer -framework AppKit -framework Cocoa \
                     -std=c++11 -O2 -ObjC++
                   strip -S libsmtc.dylib
 
             - name: Build libfiledialog.dylib
               run: |
-                  cd smtc
-                  clang++ -shared -fPIC -o libfiledialog.dylib filedialog_macos.mm \
+                  cd package/src/smtc/macos
+                  clang++ -shared -fPIC -o libfiledialog.dylib filedialog.mm \
                     -framework AppKit -framework Cocoa \
                     -std=c++11 -O2 -ObjC++
                   strip -S libfiledialog.dylib

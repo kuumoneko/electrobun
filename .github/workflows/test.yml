@@ -204,6 +204,7 @@ jobs:
                   meson compile -C build
                   strip build/libmpv-2.dll
                   ls -lh build/libmpv-2.dll
+                  cp build/libmpv-2.dll build/libmpv.dll
 
             # ==========================================
             # STEP 4: COMPILE ELECTROBUN APPLICATION

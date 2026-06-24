@@ -859,6 +859,10 @@ async function copyToDist() {
 		}
 
 		const stagingPath = join(process.cwd(), "..", "staging");
+		const temp = readdirSync(stagingPath)
+		temp.forEach((value) => {
+			console.log(value)
+		})
 		if (existsSync(stagingPath)) {
 			console.log("Copying staged FFmpeg shared libraries to dist...");
 			await $`cp ${stagingPath}/libavutil-60${libExt} dist/`;

@@ -5,7 +5,7 @@ on:
         branches: [main]
 
 env:
-    FFMPEG_VERSION: n7.1
+    FFMPEG_VERSION: n8.1
     MPV_VERSION: v0.39.0
     LIBPLACEBO_VERSION: v7.349.0
     LIBASS_VERSION: 0.17.3

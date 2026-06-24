@@ -94,7 +94,7 @@ jobs:
             # ==========================================
             - name: Compile Native Obj-C++ Bindings
               run: |
-                  cd smtc
+                  cd src/smtc/macos
                   mkdir -p build
 
                   clang++ -shared -fPIC -o build/libsmtc.dylib smtc_macos.mm \

@@ -712,6 +712,7 @@ async function buildWindowsFiledialog() {
 
 async function buildLauncher() {
 	console.log(`Building launcher for ${OS} ${ARCH}...`);
+	await $`cd src/launcher && rm -rf .zig-cache`;
 
 	let zigArgs: string[] = [];
 	if (OS === "win") {

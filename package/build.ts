@@ -822,8 +822,30 @@ async function copyToDist() {
 	]);
 
 	if (OS === "macos") {
-		await $`cp src/native/build/libNativeWrapper.dylib dist/libNativeWrapper.dylib`;
-		await $`cp vendors/zig-asar/libasar.dylib dist/libasar.dylib`;
+		const a = `${libExt}`
+		await $`cp src/native/build/libNativeWrapper${libExt} dist/libNativeWrapper${libExt}`;
+		await $`cp vendors/zig-asar/libasar${libExt} dist/libasar${libExt}`;
+
+		const smtcBuildPath = join(process.cwd(), "src", "smtc", "macos", "build");
+		if (existsSync(join(smtcBuildPath, `libsmtc${libExt}`))) {
+			console.log("Copying native SMTC and FileDialog libraries to dist...");
+			await $`cp ${smtcBuildPath}/libsmtc${libExt} dist/libsmtc${libExt}`;
+			await $`cp ${smtcBuildPath}/libfiledialog${libExt} dist/libfiledialog${libExt}`;
+		} else {
+			console.warn("⚠️ Warning: Native SMTC/FileDialog binaries not found in build directory.");
+		}
+
+		const stagingPath = join(process.cwd(), "..", "staging");
+		if (existsSync(stagingPath)) {
+			console.log("Copying staged FFmpeg shared libraries to dist...");
+			await $`cp ${stagingPath}/libavutil${libExt} dist/`;
+			await $`cp ${stagingPath}/libavformat${libExt} dist/`;
+			await $`cp ${stagingPath}/libavcodec${libExt} dist/`;
+			await $`cp ${stagingPath}/libswresample${libExt} dist/`;
+		} else {
+			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
+		}
+
 	} else if (OS === "win") {
 		await $`cp src/native/win/build/libNativeWrapper.dll dist/libNativeWrapper.dll`;
 		await $`cp vendors/webview2/Microsoft.Web.WebView2/build/native/x64/WebView2Loader.dll dist/WebView2Loader.dll`;

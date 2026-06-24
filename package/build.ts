@@ -823,7 +823,6 @@ async function copyToDist() {
 	]);
 
 	if (OS === "macos") {
-		const a = `${libExt}`
 		await $`cp src/native/build/libNativeWrapper${libExt} dist/libNativeWrapper${libExt}`;
 		await $`cp vendors/zig-asar/libasar${libExt} dist/libasar${libExt}`;
 
@@ -862,10 +861,11 @@ async function copyToDist() {
 		const stagingPath = join(process.cwd(), "..", "staging");
 		if (existsSync(stagingPath)) {
 			console.log("Copying staged FFmpeg shared libraries to dist...");
-			await $`cp ${stagingPath}/libavutil${libExt} dist/`;
-			await $`cp ${stagingPath}/libavformat${libExt} dist/`;
-			await $`cp ${stagingPath}/libavcodec${libExt} dist/`;
-			await $`cp ${stagingPath}/libswresample${libExt} dist/`;
+			await $`cp ${stagingPath}/libavutil-60${libExt} dist/`;
+			await $`cp ${stagingPath}/libavformat-62${libExt} dist/`;
+			await $`cp ${stagingPath}/libavcodec-62${libExt} dist/`;
+			await $`cp ${stagingPath}/libssp-0${libExt} dist/`;
+			await $`cp ${stagingPath}/libswresample-6${libExt} dist/`;
 		} else {
 			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
 		}

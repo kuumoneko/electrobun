@@ -500,6 +500,7 @@ jobs:
                     --prefix=$PREFIX \
                     --arch=x86_64 --target-os=mingw32 \
                     --enable-shared --disable-static --enable-pic --enable-small \
+                    --extra-ldflags="-lssp" \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-postproc --disable-everything \
@@ -522,6 +523,7 @@ jobs:
                   find "$PREFIX" -name "avutil-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "avformat-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "avcodec-*.dll" -exec cp {} $STAGING/ \;
+                  find "$PREFIX" -name "libssp-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "swresample-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "*.pc" -exec cp {} $STAGING/ \; 2>/dev/null || true
                   ls -lh $STAGING/

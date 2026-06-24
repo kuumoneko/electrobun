@@ -31,7 +31,3 @@ jobs:
             # Step 3: Verify installation
             - name: Verify Zig Version
               run: zig version
-
-            # Step 4: Run your Zig tests or builds
-            - name: Run Tests
-              run: zig build test

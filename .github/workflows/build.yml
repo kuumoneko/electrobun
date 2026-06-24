@@ -53,8 +53,6 @@ jobs:
                   path: ${{ env.PREFIX }}
                   key: ffmpeg-shared-linux-x86_64-${{ env.FFMPEG_VERSION }}-test
 
-            - run: sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
-
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
               run: |
@@ -76,6 +74,8 @@ jobs:
                     --enable-encoder="$ENCODERS"
                   make -j$(nproc)
                   make install
+
+            - run: sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
 
             - name: Stage Shared Libraries (Direct to Workspace)
               run: |

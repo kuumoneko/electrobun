@@ -62,9 +62,9 @@ jobs:
                     --prefix=$PREFIX \
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
@@ -244,6 +244,7 @@ jobs:
                   if-no-files-found: error
 
     build-macos:
+        needs: build-linux
         runs-on: macos-latest
         steps:
             # ==========================================
@@ -463,6 +464,7 @@ jobs:
                   if-no-files-found: error
 
     build-windows:
+        needs: build-macos
         runs-on: windows-latest
         steps:
             # ==========================================

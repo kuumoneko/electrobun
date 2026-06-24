@@ -1,0 +1,37 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    test:
+        name: Build and Test (Zig 0.13.0)
+        strategy:
+            fail-fast: false
+            matrix:
+                # Define the requested environments
+                os: [ubuntu-22.04, macos-latest, windows-latest]
+
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            # Step 1: Check out the repository
+            - name: Checkout Code
+              uses: actions/checkout@v4
+
+            # Step 2: Install and cache Zig 0.13.0
+            - name: Setup Zig
+              uses: mlugg/setup-zig@v2
+              with:
+                  version: 0.13.0
+
+            # Step 3: Verify installation
+            - name: Verify Zig Version
+              run: zig version
+
+            # Step 4: Run your Zig tests or builds
+            - name: Run Tests
+              run: zig build test

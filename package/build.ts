@@ -719,7 +719,7 @@ async function buildLauncher() {
 	} else if (OS === "linux") {
 		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-linux"] : ["-Dtarget=x86_64-linux"];
 	} else if (OS === "macos") {
-		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-macos"] : ["-Dtarget=x86_64-macos"];
+		zigArgs = ARCH === "arm64" ? ["-Dtarget=aarch64-macos", "-Dtarget=native-native-msvc"] : ["-Dtarget=x86_64-macos", "-Dtarget=native-native-msvc"];
 	}
 
 	const launcherLib = "./src/launcher/main.zig";

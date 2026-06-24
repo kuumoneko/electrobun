@@ -53,7 +53,7 @@ jobs:
                   cd package/src/smtc/macos
                   clang++ -shared -fPIC -o libsmtc.dylib smtc.mm \
                     -framework MediaPlayer -framework AppKit -framework Cocoa \
-                    -std=c++11 -O2 -ObjC++
+                    -std=c++11 -O2 -ObjC++ -fobjc-arc
                   strip -S libsmtc.dylib
 
             - name: Build libfiledialog.dylib
@@ -61,7 +61,7 @@ jobs:
                   cd package/src/smtc/macos
                   clang++ -shared -fPIC -o libfiledialog.dylib filedialog.mm \
                     -framework AppKit -framework Cocoa \
-                    -std=c++11 -O2 -ObjC++
+                    -std=c++11 -O2 -ObjC++ -fobjc-arc
                   strip -S libfiledialog.dylib
 
             - name: Upload artifacts

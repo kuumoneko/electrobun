@@ -36,30 +36,32 @@ static std::string g_thumbnailPath;
 {
     MPRemoteCommandCenter *center = [MPRemoteCommandCenter sharedCommandCenter];
 
-    __weak SMTCDelegate *weakSelf = self;
-
     center.playCommand.enabled = YES;
-    [center.playCommand addTargetUsingBlock:^(MPRemoteCommandEvent * _Nonnull event) {
+    [center.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent * _Nonnull event) {
         std::lock_guard<std::mutex> lock(g_mtx);
         g_buttonQueue.push(0);
+        return MPRemoteCommandHandlerStatusSuccess;
     }];
 
     center.pauseCommand.enabled = YES;
-    [center.pauseCommand addTargetUsingBlock:^(MPRemoteCommandEvent * _Nonnull event) {
+    [center.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent * _Nonnull event) {
         std::lock_guard<std::mutex> lock(g_mtx);
         g_buttonQueue.push(1);
+        return MPRemoteCommandHandlerStatusSuccess;
     }];
 
     center.nextTrackCommand.enabled = YES;
-    [center.nextTrackCommand addTargetUsingBlock:^(MPRemoteCommandEvent * _Nonnull event) {
+    [center.nextTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent * _Nonnull event) {
         std::lock_guard<std::mutex> lock(g_mtx);
         g_buttonQueue.push(2);
+        return MPRemoteCommandHandlerStatusSuccess;
     }];
 
     center.previousTrackCommand.enabled = YES;
-    [center.previousTrackCommand addTargetUsingBlock:^(MPRemoteCommandEvent * _Nonnull event) {
+    [center.previousTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent * _Nonnull event) {
         std::lock_guard<std::mutex> lock(g_mtx);
         g_buttonQueue.push(3);
+        return MPRemoteCommandHandlerStatusSuccess;
     }];
 }
 
@@ -101,8 +103,7 @@ static std::string g_thumbnailPath;
                     return image;
                 }];
             info[MPMediaItemPropertyArtwork] = artwork;
-            [artwork release];
-            [image release];
+            // Removed manual [artwork release] and [image release] since ARC takes care of it
         }
     }
 
@@ -118,7 +119,7 @@ static std::string g_thumbnailPath;
     }
     info[MPNowPlayingInfoPropertyPlaybackRate] = playing ? @1.0 : @0.0;
     infoCenter.nowPlayingInfo = info;
-    [info release];
+    // Removed [info release] for ARC
 }
 
 @end
@@ -231,7 +232,7 @@ extern "C" void smtc_destroy()
         [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = nil;
 
         if (g_delegate) {
-            [g_delegate release];
+            // Removed [g_delegate release] for ARC
             g_delegate = nil;
         }
     }

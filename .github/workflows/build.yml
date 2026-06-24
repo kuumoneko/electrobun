@@ -64,8 +64,7 @@ jobs:
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \
-
-                    --enable-network --enable-zlib \
+                    --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
                     --enable-demuxer="$DEMUXERS" \

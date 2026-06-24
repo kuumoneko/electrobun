@@ -64,7 +64,7 @@ jobs:
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
+      
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
@@ -295,7 +295,7 @@ jobs:
                     --prefix=$PREFIX \
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
+                   
                     --disable-avdevice --disable-avfilter --disable-swscale \
                      --disable-everything \
                     --enable-network --enable-zlib \
@@ -521,7 +521,7 @@ jobs:
                     --prefix=$PREFIX \
                     --arch=x86_64 --target-os=mingw32 \
                     --enable-shared --disable-static --enable-pic --enable-small \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
+                   
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \

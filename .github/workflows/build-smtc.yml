@@ -1,0 +1,119 @@
+name: Build SMTC + FileDialog shared libraries
+
+on:
+    workflow_dispatch:
+    push:
+        branches: [main]
+
+jobs:
+    build-linux:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y libdbus-1-dev libx11-dev
+
+            - name: Build libsmtc.so
+              run: |
+                  cd smtc
+                  g++ -shared -fPIC -o libsmtc.so \
+                    -I. smtc_linux.cpp \
+                    $(pkg-config --cflags --libs dbus-1) \
+                    -std=c++11 -O2 \
+                    -Wl,-soname,libsmtc.so
+                  strip libsmtc.so
+
+            - name: Build libfiledialog.so
+              run: |
+                  cd smtc
+                  gcc -shared -fPIC -o libfiledialog.so \
+                    -I. filedialog_linux.cpp \
+                    tinyfiledialogs/tinyfiledialogs.c \
+                    -lX11 -O2 -D_GNU_SOURCE
+                  strip libfiledialog.so
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-linux-x86_64
+                  path: |
+                      smtc/libsmtc.so
+                      smtc/libfiledialog.so
+
+    build-macos:
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Build libsmtc.dylib
+              run: |
+                  cd smtc
+                  clang++ -shared -fPIC -o libsmtc.dylib smtc_macos.mm \
+                    -framework MediaPlayer -framework AppKit -framework Cocoa \
+                    -std=c++11 -O2 -ObjC++
+                  strip -S libsmtc.dylib
+
+            - name: Build libfiledialog.dylib
+              run: |
+                  cd smtc
+                  clang++ -shared -fPIC -o libfiledialog.dylib filedialog_macos.mm \
+                    -framework AppKit -framework Cocoa \
+                    -std=c++11 -O2 -ObjC++
+                  strip -S libfiledialog.dylib
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-macos-x86_64
+                  path: |
+                      smtc/libsmtc.dylib
+                      smtc/libfiledialog.dylib
+
+    build-windows:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Build smtc.dll
+              shell: cmd
+              run: |
+                  cd smtc
+                  cl /nologo /LD /EHsc /std:c++17 /O2 smtc.cpp \
+                    /link /out:smtc.dll windowsapp.lib
+                  if exist smtc.dll echo smtc.dll built successfully
+
+            - name: Build filedialog.dll
+              shell: cmd
+              run: |
+                  cd smtc
+                  cl /nologo /LD /EHsc /std:c++17 /O2 filedialog.cpp \
+                    /link /out:filedialog.dll ole32.lib shell32.lib
+                  if exist filedialog.dll echo filedialog.dll built successfully
+
+            - name: Build aumid.dll
+              shell: cmd
+              run: |
+                  cd smtc
+                  cl /nologo /LD /EHsc /std:c++17 /O2 aumid.cpp \
+                    /link /out:aumid.dll ole32.lib shell32.lib
+                  if exist aumid.dll echo aumid.dll built successfully
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-windows-x86_64
+                  path: |
+                      smtc/smtc.dll
+                      smtc/smtc.lib
+                      smtc/smtc.exp
+                      smtc/filedialog.dll
+                      smtc/filedialog.lib
+                      smtc/filedialog.exp
+                      smtc/aumid.dll
+                      smtc/aumid.lib
+                      smtc/aumid.exp

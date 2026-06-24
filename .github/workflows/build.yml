@@ -34,17 +34,18 @@ jobs:
               with:
                   version: 0.13.0
 
-            - name: Install System Compilation Tools
-              run: |
-                  sudo apt update
-                  sudo apt install -y build-essential cmake pkg-config nasm git \
-                     libdbus-1-dev libx11-dev libasound2-dev libcurl4-openssl-dev \
-                     libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
-                     libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
-                     libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
+             - name: Install System Compilation Tools
+               run: |
+                   sudo apt update
+                   sudo apt install -y build-essential cmake pkg-config nasm git \
+                      libdbus-1-dev libx11-dev libasound2-dev libcurl4-openssl-dev \
+                      libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
+                      libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
+                      libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
+                   sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
 
-            # ==========================================
-            # STEP 1: BUILD SHARED FFMPEG
+             # ==========================================
+             # STEP 1: BUILD SHARED FFMPEG
             # ==========================================
             - name: Cache Shared FFmpeg Binaries
               id: cache-ffmpeg-shared
@@ -64,7 +65,8 @@ jobs:
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \
-                    --enable-zlib \
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
+                    --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
                     --enable-demuxer="$DEMUXERS" \
@@ -74,8 +76,6 @@ jobs:
                     --enable-encoder="$ENCODERS"
                   make -j$(nproc)
                   make install
-
-            - run: sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
 
             - name: Stage Shared Libraries (Direct to Workspace)
               run: |
@@ -296,7 +296,7 @@ jobs:
                     --prefix=$PREFIX \
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                   
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                      --disable-everything \
                     --enable-network --enable-zlib \
@@ -522,7 +522,7 @@ jobs:
                     --prefix=$PREFIX \
                     --arch=x86_64 --target-os=mingw32 \
                     --enable-shared --disable-static --enable-pic --enable-small \
-                   
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \

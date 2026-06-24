@@ -41,8 +41,7 @@ jobs:
                      libdbus-1-dev libx11-dev libasound2-dev libcurl4-openssl-dev \
                      libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
                      libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
-                     libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev \
-                     libssp-dev
+                     libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
 
             # ==========================================
             # STEP 1: BUILD SHARED FFMPEG
@@ -53,6 +52,8 @@ jobs:
               with:
                   path: ${{ env.PREFIX }}
                   key: ffmpeg-shared-linux-x86_64-${{ env.FFMPEG_VERSION }}-test
+
+            - run: sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
 
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'

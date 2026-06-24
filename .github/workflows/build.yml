@@ -6,8 +6,8 @@ on:
 
 env:
     FFMPEG_VERSION: n8.1
-    MPV_VERSION: v0.39.0
-    LIBPLACEBO_VERSION: v7.349.0
+    MPV_VERSION: v0.41.0
+    LIBPLACEBO_VERSION: v7.360.1
     LIBASS_VERSION: 0.17.3
     PREFIX: ${{ github.workspace }}/prefix
     MPVPREFIX: ${{ github.workspace }}/mpvprefix

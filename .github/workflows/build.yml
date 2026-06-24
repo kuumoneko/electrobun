@@ -58,7 +58,7 @@ jobs:
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
-                    --disable-postproc --disable-everything \
+                    --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
@@ -119,7 +119,7 @@ jobs:
                     --prefix=${{ env.MPVPREFIX }} \
                     --enable-static --disable-shared --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                    --disable-avdevice --disable-postproc --disable-everything \
+                    --disable-avdevice  --disable-everything \
                     --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
@@ -283,7 +283,7 @@ jobs:
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
-                    --disable-postproc --disable-everything \
+                     --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
@@ -350,7 +350,7 @@ jobs:
                     --prefix=${{ env.MPVPREFIX }} \
                     --enable-static --disable-shared --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                    --disable-avdevice --disable-postproc --disable-everything \
+                    --disable-avdevice  --disable-everything \
                     --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
@@ -503,7 +503,7 @@ jobs:
                     --extra-ldflags="-lssp" \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
-                    --disable-postproc --disable-everything \
+                     --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \
@@ -574,7 +574,7 @@ jobs:
                     --arch=x86_64 --target-os=mingw32 \
                     --enable-static --disable-shared --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
-                    --disable-avdevice --disable-postproc --disable-everything \
+                    --disable-avdevice  --disable-everything \
                     --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"

@@ -83,6 +83,7 @@ jobs:
                   cp $PREFIX/lib/libavformat.so* $STAGING/
                   cp $PREFIX/lib/libavcodec.so* $STAGING/
                   cp $PREFIX/lib/libswresample.so* $STAGING/
+                  cp $PREFIX/lib/libssp.so* $STAGING/
                   cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
 
             # ==========================================
@@ -315,6 +316,7 @@ jobs:
                   cp $PREFIX/lib/libavformat*.dylib $STAGING/
                   cp $PREFIX/lib/libavcodec*.dylib $STAGING/
                   cp $PREFIX/lib/libswresample*.dylib $STAGING/
+                  cp $PREFIX/lib/libssp*.dylib $STAGING/
                   cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
                   ls -lh $STAGING/
 

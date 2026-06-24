@@ -34,18 +34,18 @@ jobs:
               with:
                   version: 0.13.0
 
-             - name: Install System Compilation Tools
-               run: |
-                   sudo apt update
-                   sudo apt install -y build-essential cmake pkg-config nasm git \
-                      libdbus-1-dev libx11-dev libasound2-dev libcurl4-openssl-dev \
-                      libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
-                      libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
-                      libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
-                   sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
+            - name: Install System Compilation Tools
+              run: |
+                  sudo apt update
+                  sudo apt install -y build-essential cmake pkg-config nasm git \
+                     libdbus-1-dev libx11-dev libasound2-dev libcurl4-openssl-dev \
+                     libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
+                     libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
+                     libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
+                  sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
 
-             # ==========================================
-             # STEP 1: BUILD SHARED FFMPEG
+              # ==========================================
+              # STEP 1: BUILD SHARED FFMPEG
             # ==========================================
             - name: Cache Shared FFmpeg Binaries
               id: cache-ffmpeg-shared

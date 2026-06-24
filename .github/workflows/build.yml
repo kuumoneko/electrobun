@@ -29,6 +29,11 @@ jobs:
             - name: Checkout Repository
               uses: actions/checkout@v4
 
+            - name: Setup Zig
+              uses: mlugg/setup-zig@v2
+              with:
+                  version: 0.13.0
+
             - name: Install System Compilation Tools
               run: |
                   sudo apt update
@@ -57,6 +62,7 @@ jobs:
                     --prefix=$PREFIX \
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                     --disable-everything \
                     --enable-network --enable-zlib \
@@ -246,6 +252,11 @@ jobs:
             - name: Checkout Repository
               uses: actions/checkout@v4
 
+            - name: Setup Zig
+              uses: mlugg/setup-zig@v2
+              with:
+                  version: 0.13.0
+
             - name: Setup Homebrew Cache
               uses: actions/cache@v4
               with:
@@ -282,6 +293,7 @@ jobs:
                     --prefix=$PREFIX \
                     --enable-shared --disable-static --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                      --disable-everything \
                     --enable-network --enable-zlib \
@@ -459,6 +471,11 @@ jobs:
             - name: Checkout Repository
               uses: actions/checkout@v4
 
+            - name: Setup Zig
+              uses: mlugg/setup-zig@v2
+              with:
+                  version: 0.13.0
+
             - name: Setup MSYS2 Environment
               uses: msys2/setup-msys2@v2
               with:
@@ -503,7 +520,7 @@ jobs:
                     --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
-                     --disable-everything \
+                    --disable-everything \
                     --enable-network --enable-zlib \
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" \

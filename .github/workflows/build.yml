@@ -500,7 +500,7 @@ jobs:
                     --prefix=$PREFIX \
                     --arch=x86_64 --target-os=mingw32 \
                     --enable-shared --disable-static --enable-pic --enable-small \
-                    --extra-ldflags="-lssp" \
+                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
                     --disable-doc --disable-debug --disable-programs \
                     --disable-avdevice --disable-avfilter --disable-swscale \
                      --disable-everything \

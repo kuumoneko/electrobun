@@ -41,7 +41,8 @@ jobs:
                      libdbus-1-dev libx11-dev libasound2-dev libcurl4-openssl-dev \
                      libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
                      libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
-                     libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
+                     libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev \
+                     libssp-dev
 
             # ==========================================
             # STEP 1: BUILD SHARED FFMPEG
@@ -82,8 +83,8 @@ jobs:
                   cp $PREFIX/lib/libavformat.so* $STAGING/
                   cp $PREFIX/lib/libavcodec.so* $STAGING/
                   cp $PREFIX/lib/libswresample.so* $STAGING/
-                  cp $PREFIX/lib/libssp.so* $STAGING/
                   cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
+                  cp /usr/lib/x86_64-linux-gnu/libssp.so* $STAGING/
 
             # ==========================================
             # STEP 2: BUILD NATIVE SMTC & FILEDIALOG
@@ -272,7 +273,7 @@ jobs:
                   brew update
                   brew install meson ninja pkg-config nasm cmake \
                     openssl@3 zlib curl vulkan-headers \
-                    fribidi harfbuzz
+                    fribidi harfbuzz gcc
                   pip3 install --break-system-packages jinja2
 
             # ==========================================
@@ -315,8 +316,8 @@ jobs:
                   cp $PREFIX/lib/libavformat*.dylib $STAGING/
                   cp $PREFIX/lib/libavcodec*.dylib $STAGING/
                   cp $PREFIX/lib/libswresample*.dylib $STAGING/
-                  cp $PREFIX/lib/libssp*.dylib $STAGING/
                   cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
+                  find /usr/local/lib/gcc -name "libssp*.dylib*" -exec cp {} $STAGING/ \;
                   ls -lh $STAGING/
 
             # ==========================================
@@ -543,7 +544,7 @@ jobs:
                   find "$PREFIX" -name "avutil-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "avformat-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "avcodec-*.dll" -exec cp {} $STAGING/ \;
-                  find "$PREFIX" -name "libssp-*.dll" -exec cp {} $STAGING/ \;
+                  find /ucrt64/bin -name "libssp-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "swresample-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "*.pc" -exec cp {} $STAGING/ \; 2>/dev/null || true
                   ls -lh $STAGING/

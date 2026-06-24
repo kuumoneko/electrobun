@@ -89,7 +89,7 @@ function getPlatformPaths(
 		AVFORMAT: join(platformDistDir, "avformat-62.dll"),
 		AVCODEC: join(platformDistDir, "avcodec-62.dll"),
 		AVUTIL: join(platformDistDir, "avutil-60.dll"),
-		LIBSSP: join(platformDistDir, "libssp-0.dll"),
+		LIBSSP: join(platformDistDir, targetOS === "win" ? "libssp-0.dll" : targetOS === "macos" ? "libssp.dylib" : "libssp.so"),
 		SWREXAMPLE: join(platformDistDir, "swresample-6.dll"),
 		AUMID: join(platformDistDir, "aumid.dll"),
 		FILE_DIALOG: join(platformDistDir, "filedialog.dll"),
@@ -517,7 +517,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 		const avutilDestination = join(appBundleMacOSPath, "avutil-60.dll");
 
 		const libsspSource = targetPaths.LIBSSP;
-		const libsspDestination = join(appBundleMacOSPath, "libssp-0.dll");
+		const libsspDestination = join(appBundleMacOSPath, targetOS === "win" ? "libssp-0.dll" : targetOS === "macos" ? "libssp.dylib" : "libssp.so");
 
 		const swresampleSource = targetPaths.SWREXAMPLE;
 		const swresampleDestination = join(appBundleMacOSPath, "swresample-6.dll");

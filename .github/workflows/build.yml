@@ -490,7 +490,7 @@ jobs:
 
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
-              shell: C:\msys64\usr\bin\bash.exe {0}
+              shell: msys2 {0}
               run: |
                   export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
                   export PKG_CONFIG_PATH="/ucrt64/lib/pkgconfig"
@@ -516,7 +516,7 @@ jobs:
                   make install
 
             - name: Stage Shared Libraries (Direct to Workspace)
-              shell: C:\msys64\usr\bin\bash.exe {0}
+              shell: msys2 {0}
               run: |
                   export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
                   mkdir -p $STAGING

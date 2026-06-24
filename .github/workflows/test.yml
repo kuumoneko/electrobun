@@ -107,7 +107,7 @@ jobs:
             - name: Compile Native C++ Bindings (MSVC)
               shell: cmd
               run: |
-                  cd package\src\smtc\windows
+                  cd package\src\smtc\win
                   if not exist build mkdir build
                   cd build
 

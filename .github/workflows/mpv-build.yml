@@ -350,24 +350,45 @@ jobs:
                   cd mpv
                   export PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}" \
                   meson setup build \
-                    -Dcplayer=false -Dlibmpv=true \
-                    -Ddefault_library=shared -Dbuildtype=release \
-                    -Dbuild-date=false -Dgpl=false \
-                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
-                    -Dwasapi=enabled -Dwin32-smtc=disabled \
-                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
-                    -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
-                    -Dd3d11=disabled -Ddirect3d=disabled \
-                    -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled \
-                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
-                    -Dlibarchive=disabled -Drubberband=disabled \
-                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
-                    -Duchardet=disabled -Dvapoursynth=disabled \
-                    -Diconv=disabled -Dzlib=disabled \
+                    -Dcplayer=false \
+                    -Dlibmpv=true \
+                    -Ddefault_library=shared \
+                    -Dbuildtype=release \
+                    -Dbuild-date=false \
+                    -Dgpl=false \
+                    -Dlua=disabled \
+                    -Djavascript=disabled \
+                    -Dcplugins=disabled \
+                    -Dwasapi=enabled \
+                    -Dwin32-smtc=disabled \
+                    -Dgl=disabled \
+                    -Dvulkan=disabled \
+                    -Degl=disabled \
+                    -Degl-angle=disabled \
+                    -Dshaderc=disabled \
+                    -Dspirv-cross=disabled \
+                    -Dd3d11=disabled \
+                    -Ddirect3d=disabled \
+                    -Dcuda-hwaccel=disabled \
+                    -Dd3d-hwaccel=disabled \
+                    -Dlcms2=disabled \
+                    -Dzimg=disabled \
+                    -Djpeg=disabled \
+                    -Dlibarchive=disabled \
+                    -Drubberband=disabled \
+                    -Dcdda=disabled \
+                    -Ddvdnav=disabled \
+                    -Dlibbluray=disabled \
+                    -Duchardet=disabled \
+                    -Dvapoursynth=disabled \
+                    -Diconv=disabled \
+                    -Dzlib=disabled \
                     -Dcaca=disabled \
-                    -Dmanpage-build=disabled -Dtests=false \
+                    -Dmanpage-build=disabled \
+                    -Dtests=false \
                     -Dc_args='-ffunction-sections -fdata-sections' \
-                     -Dc_link_args='-Wl,--gc-sections -lstdc++'
+                    -Dc_link_args='-Wl,--gc-sections -lstdc++'
+                    
                   meson compile -C build
                   strip build/libmpv-2.dll
                   ls -lh build/libmpv-2.dll

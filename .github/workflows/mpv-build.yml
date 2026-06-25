@@ -286,7 +286,7 @@ jobs:
               if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig')"
+                  FFMPEG_PREFIX="$(cygpath -u '${{github.workspace}}/libmpv_ffmpeg')"
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static
                   ./configure \
@@ -310,27 +310,35 @@ jobs:
             - name: Build Dependency - libplacebo (Static)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv/lib/pkgconfig')"
+                  FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
+                  LIBMPV_PREFIX="$(cygpath -u '${{ github.workspace }}/libmpv')"
+
                   git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
                   cd libplacebo
                   git submodule update --init --depth 1
+
+                  export PKG_CONFIG_PATH="${FFMPEG_PC}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Ddemos=false -Dtests=false -Dbench=false \
                     -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
-                    --prefix $MPVPREFIX_PATH
+                    --prefix $LIBMPV_PREFIX
                   meson install -C build
 
             - name: Build Dependency - libass (Static)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv/lib/pkgconfig')"
+                  FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
+                  LIBMPV_PREFIX="$(cygpath -u '${{ github.workspace }}/libmpv')"
+
                   git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
                   cd libass
+
+                  export PKG_CONFIG_PATH="${FFMPEG_PC}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Dfontconfig=disabled \
-                    --prefix $MPVPREFIX_PATH
+                    --prefix $LIBMPV_PREFIX
                   meson install -C build
 
             - name: Build libmpv (Shared)

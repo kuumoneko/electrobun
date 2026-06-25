@@ -281,7 +281,7 @@ jobs:
                       git
                       make
 
-            - name: Build Static Audio-Only FFmpeg
+            - name: Build libmpv FFmpeg
               if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
               shell: msys2 {0}
               run: |
@@ -298,6 +298,13 @@ jobs:
                     --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                     --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
                   make -j$(nproc) install
+
+            - name: Save libmpv ffmpeg cache
+              if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{env.FFMPEG_OUTDIR}}
+                  key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
 
             - name: Build Dependency - libplacebo (Static)
               shell: msys2 {0}

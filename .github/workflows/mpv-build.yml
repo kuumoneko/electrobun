@@ -70,9 +70,10 @@ jobs:
 
             - name: Build libplacebo
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
-                    https://github.com/haasn/libplacebo.git
+                  git clone --depth 1 https://github.com/haasn/libplacebo.git
                   cd libplacebo
+                  git fetch --tags --depth 1 origin refs/tags/${{ env.LIBPLACEBO_VERSION }}:refs/tags/${{ env.LIBPLACEBO_VERSION }}
+                  git checkout FETCH_HEAD
                   git submodule update --init --depth 1
                   PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                   meson setup build \
@@ -84,9 +85,10 @@ jobs:
 
             - name: Build libass
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
-                    https://github.com/libass/libass.git
+                  git clone --depth 1 https://github.com/libass/libass.git
                   cd libass
+                  git fetch --tags --depth 1 origin refs/tags/${{ env.LIBASS_VERSION }}:refs/tags/${{ env.LIBASS_VERSION }}
+                  git checkout FETCH_HEAD
                   PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \

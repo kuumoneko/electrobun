@@ -273,6 +273,7 @@ jobs:
                   cache: false
                   install: >-
                       mingw-w64-ucrt-x86_64-toolchain
+                      mingw-w64-ucrt-x86_64-meson
                       mingw-w64-ucrt-x86_64-ninja
                       mingw-w64-ucrt-x86_64-pkgconf
                       mingw-w64-ucrt-x86_64-nasm
@@ -307,27 +308,15 @@ jobs:
                   path: ${{env.FFMPEG_OUTDIR}}
                   key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
 
-            - name: Setup Python
-              uses: actions/setup-python@v5
-              with:
-                  python-version: "3.x"
-
-            - name: Install deps and Meson
-              run: |
-                  python -m pip install --upgrade pip
-                  pip install "meson>=0.63"
-
             - name: Build Dependency - libplacebo (Static)
               shell: msys2 {0}
               run: |
-                  FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
                   LIBMPV_PREFIX="$(cygpath -u '${{ github.workspace }}/libmpv')"
 
                   git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
                   cd libplacebo
                   git submodule update --init --depth 1
 
-                  export PKG_CONFIG_PATH="${FFMPEG_PC}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Ddemos=false -Dtests=false -Dbench=false \
@@ -338,13 +327,11 @@ jobs:
             - name: Build Dependency - libass (Static)
               shell: msys2 {0}
               run: |
-                  FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
                   LIBMPV_PREFIX="$(cygpath -u '${{ github.workspace }}/libmpv')"
 
                   git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
                   cd libass
 
-                  export PKG_CONFIG_PATH="${FFMPEG_PC}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Dfontconfig=disabled \
@@ -354,10 +341,11 @@ jobs:
             - name: Build libmpv (Shared)
               shell: msys2 {0}
               run: |
-                  FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
-                  LIBMPV_PC="$(cygpath -u '${{ github.workspace }}/libmpv/lib/pkgconfig')"
-                  cd mpv
+                  FFMPEG_PC="$(cygpath -u "$GITHUB_WORKSPACE/libmpv_ffmpeg/lib/pkgconfig")"
+                  LIBMPV_PC="$(cygpath -u "$GITHUB_WORKSPACE/libmpv/lib/pkgconfig")"
                   export PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}"
+
+                  cd mpv
 
                   meson setup build \
                     -Dcplayer=false \

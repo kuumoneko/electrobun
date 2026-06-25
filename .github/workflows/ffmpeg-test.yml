@@ -1,0 +1,106 @@
+name: Build Shared FFmpeg n8.1
+
+on:
+    push:
+        branches: [main, master]
+    workflow_dispatch:
+
+jobs:
+    build-cross-platform:
+        runs-on: macos-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install Build Dependencies & Cross-Compilers
+              run: |
+                  brew update
+                  brew install git make nasm yasm x86_64-elf-gcc mingw-w64
+
+            - name: Clone FFmpeg n8.1 Source
+              run: |
+                  # Fetch only the specific n8.1 tag to save bandwith and clone time
+                  git clone --depth 1 --branch n8.1 https://git.ffmpeg.org/ffmpeg.git ffmpeg-source
+
+            - name: Build for macOS (Native x86_64/arm64 depending on runner)
+              run: |
+                  cd ffmpeg-source
+                  ./configure \
+                    --prefix=../dist/macos \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc
+                  make -j$(sysctl -n hw.ncpu)
+                  make install
+                  make distclean
+
+            - name: Build for Linux (Cross-compiled to x86_64)
+              run: |
+                  cd ffmpeg-source
+                  ./configure \
+                    --prefix=../dist/linux \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc \
+                    --enable-cross-compile \
+                    --target-os=linux \
+                    --arch=x86_64 \
+                    --cross-prefix=x86_64-elf-
+                  make -j$(sysctl -n hw.ncpu)
+                  make install
+                  make distclean
+
+            - name: Build for Windows (Cross-compiled to x86_64 via MinGW)
+              run: |
+                  cd ffmpeg-source
+                  ./configure \
+                    --prefix=../dist/windows \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \ 
+                    --disable-doc \
+                    --enable-cross-compile \
+                    --target-os=mingw32 \
+                    --arch=x86_64 \
+                    --cross-prefix=x86_64-w64-mingw32-
+                  make -j$(sysctl -n hw.ncpu)
+                  make install
+
+            - name: Bundle MinGW Runtime Dependencies (libssp-0.dll)
+              run: |
+                  # Locate the MinGW runtime folder managed by Homebrew on macOS
+                  # It is typically located under /opt/homebrew/Cellar/mingw-w64/
+                  MINGW_BIN_DIR=$(dirname $(which x86_64-w64-mingw32-gcc))
+                            
+                  echo "Searching for libssp-0.dll in toolchain path..."
+                  # Find the compiled windows target version of libssp-0.dll
+                  SSP_PATH=$(find /opt/homebrew/opt/mingw-w64 -name "libssp-0.dll" | head -n 1)
+                            
+                  if [ -f "$SSP_PATH" ]; then
+                    echo "Found libssp-0.dll at: $SSP_PATH"
+                    cp "$SSP_PATH" dist/windows/bin/
+                    echo "Successfully bundled libssp-0.dll into dist/windows/bin/"
+                  else
+                    echo "Warning: libssp-0.dll not found via standard Cellar path. Searching active binary paths..."
+                    # Fallback search if pathing structures differ
+                    SSP_PATH_FALLBACK=$(find /opt/homebrew -name "libssp-0.dll" 2>/dev/null | head -n 1)
+                    if [ -n "$SSP_PATH_FALLBACK" ]; then
+                      cp "$SSP_PATH_FALLBACK" dist/windows/bin/
+                    else
+                      echo "Error: Could not locate libssp-0.dll" && exit 1
+                    fi
+                  fi
+
+            - name: Clean up Build Folders for Artifacts
+              run: |
+                  # Keep only the essential lib binaries and headers to minimize artifact size
+                  rm -rf dist/windows/share dist/linux/share dist/macos/share
+
+            - name: Upload Compiled Shared Libraries
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-n8.1-shared-libs
+                  path: dist/

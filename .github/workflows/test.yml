@@ -101,49 +101,56 @@ jobs:
             # ----------------------------------------------------------------
             # ORGANIZE AND VERIFY ARTIFACTS
             # ----------------------------------------------------------------
-            - name: Prepare Artifacts Bundle
+            - name: Prepare Artifacts Bundle (Windows)
+              if: matrix.os == 'windows-latest'
+              shell: msys2 {0} # <--- This forces the environment to natively recognize pacman/tar
+              run: |
+                  mkdir -p final-bundle
+                    
+                  # 1. Copy our compiled FFmpeg DLL files from the global workspace
+                  cp "$GITHUB_WORKSPACE/dist/bin"/*.dll final-bundle/ || true
+                    
+                  # 2. Safely use pacman to download the archive file
+                  echo "Caching GCC Runtime library package..."
+                  pacman -Sw --noconfirm mingw-w64-x86_64-gcc-libs
+                    
+                  echo "Locating and extracting the downloaded archive package..."
+                  PKG_FILE=$(ls /var/cache/pacman/pkg/mingw-w64-x86_64-gcc-libs-*.pkg.tar.zst | head -n 1)
+                    
+                  if [ -n "$PKG_FILE" ]; then
+                    echo "Extracting package file: $PKG_FILE"
+                    tar -xf "$PKG_FILE"
+                    
+                    if [ -f "mingw64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll! Copying to bundle..."
+                      cp mingw64/bin/libssp-0.dll final-bundle/
+                    else
+                      echo "Error: libssp-0.dll not found inside extracted tree structure."
+                      exit 1
+                    fi
+                  else
+                    echo "Error: Could not locate the downloaded pacman archive package file."
+                    exit 1
+                  fi
+                    
+                  # Move everything to the workspace final destination
+                  mkdir -p "$GITHUB_WORKSPACE/final-bundle"
+                  cp final-bundle/* "$GITHUB_WORKSPACE/final-bundle/"
+                    
+                  echo "--- Final Captured Binaries ---"
+                  ls -la "$GITHUB_WORKSPACE/final-bundle"
+
+            - name: Prepare Artifacts Bundle (Unix-like)
+              if: matrix.os != 'windows-latest'
               shell: bash
               run: |
                   mkdir -p final-bundle
-
-                  if [ "${{ matrix.os }}" = "windows-latest" ]; then
-                    # 1. Copy our compiled FFmpeg DLL files
-                    cp dist/bin/*.dll final-bundle/ || true
-
-                    # 2. Use pacman to fetch the cached archive package local to the environment
-                    echo "Caching GCC Runtime library package..."
-                    # --downloadonly / -w ensures it fetches without overwriting active compiler paths
-                    # --noconfirm handles the interactive prompt automatically
-                    msys2 -c "pacman -Sw --noconfirm mingw-w64-x86_64-gcc-libs"
-
-                    echo "Locating and extracting the downloaded archive package..."
-                    # Pacman stores downloaded packages in /var/cache/pacman/pkg/
-                    PKG_FILE=$(msys2 -c "ls /var/cache/pacman/pkg/mingw-w64-x86_64-gcc-libs-*.pkg.tar.zst" | head -n 1)
-
-                    if [ -n "$PKG_FILE" ]; then
-                      echo "Extracting package file: $PKG_FILE"
-                      # Convert path string styles from MSYS to typical Unix
-                      REAL_PATH=$(msys2 -c "cygpath -w $PKG_FILE")
-                      tar -xf "$REAL_PATH"
-
-                      if [ -f "mingw64/bin/libssp-0.dll" ]; then
-                        echo "Successfully found libssp-0.dll! Copying to bundle..."
-                        cp mingw64/bin/libssp-0.dll final-bundle/
-                      else
-                        echo "Error: libssp-0.dll not found inside extracted tree structure."
-                        exit 1
-                      fi
-                    else
-                      echo "Error: Could not locate the downloaded pacman archive package file."
-                      exit 1
-                    fi
-
-                  elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+                  if [ "${{ matrix.os }}" = "macos-latest" ]; then
                     cp dist/lib/*.dylib final-bundle/ || true
                   else
                     cp dist/lib/*.so* final-bundle/ || true
                   fi
-
+                    
                   echo "--- Final Captured Binaries ---"
                   ls -la final-bundle
 

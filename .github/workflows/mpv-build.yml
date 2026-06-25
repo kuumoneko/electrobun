@@ -291,7 +291,7 @@ jobs:
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static
                   ./configure \
-                    --prefix=$MPVPREFIX_PATH \
+                    --prefix=$FFMPEG_PREFIX \
                     --arch=x86_64 --target-os=mingw32 \
                     --enable-static --disable-shared --enable-pic --enable-small \
                     --disable-doc --disable-debug --disable-programs \
@@ -348,7 +348,7 @@ jobs:
                   FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
                   LIBMPV_PC="$(cygpath -u '${{ github.workspace }}/libmpv/lib/pkgconfig')"
                   cd mpv
-                  PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}" \
+                  export PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}" \
                   meson setup build \
                     -Dcplayer=false -Dlibmpv=true \
                     -Ddefault_library=shared -Dbuildtype=release \

@@ -108,8 +108,8 @@ jobs:
                     --disable-static \
                     --disable-programs \
                     --disable-doc
-                    --cc="ccache gcc"
-                  make -j$(nproc 2>/dev/null || echo 4)
+
+                  make -j$CORES
                   make install
 
             # ----------------------------------------------------------------

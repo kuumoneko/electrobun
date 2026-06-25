@@ -50,7 +50,7 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ${{ env.PREFIX }}
-                  key: ffmpeg-shared-linux-x86_64-${{ env.FFMPEG_VERSION }}-test
+                  key: ffmpeg-shared-linux-x86_64-${{ env.FFMPEG_VERSION }}
 
             - name: Build Shared FFmpeg
               if: steps.cache-ffmpeg-shared.outputs.cache-hit != 'true'
@@ -58,21 +58,13 @@ jobs:
                   git clone --depth 1 --branch $FFMPEG_VERSION https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
                   cd ffmpeg-src
                   ./configure \
-                    --prefix=$PREFIX \
-                    --enable-shared --disable-static --enable-pic --enable-small \
-                    --disable-doc --disable-debug --disable-programs \
-                    --disable-avdevice --disable-avfilter --disable-swscale \
-                    --disable-everything \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
-                    --enable-network --enable-zlib \
-                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder="$DECODERS" \
-                    --enable-demuxer="$DEMUXERS" \
-                    --enable-parser="$PARSERS" \
-                    --enable-bsf="$BSFS" \
-                    --enable-muxer="$MUXERS" \
-                    --enable-encoder="$ENCODERS"
-                  make -j$(nproc)
+                    --prefix=$GITHUB_WORKSPACE/dist \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc \
+                    --enable-pic
+                  make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
                   make install
 
             - name: Stage Shared Libraries (Direct to Workspace)
@@ -291,21 +283,13 @@ jobs:
                   git clone --depth 1 --branch $FFMPEG_VERSION https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
                   cd ffmpeg-src
                   ./configure \
-                    --prefix=$PREFIX \
-                    --enable-shared --disable-static --enable-pic --enable-small \
-                    --disable-doc --disable-debug --disable-programs \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
-                    --disable-avdevice --disable-avfilter --disable-swscale \
-                     --disable-everything \
-                    --enable-network --enable-zlib \
-                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder="$DECODERS" \
-                    --enable-demuxer="$DEMUXERS" \
-                    --enable-parser="$PARSERS" \
-                    --enable-bsf="$BSFS" \
-                    --enable-muxer="$MUXERS" \
-                    --enable-encoder="$ENCODERS"
-                  make -j$(sysctl -n hw.logicalcpu)
+                    --prefix=$GITHUB_WORKSPACE/dist \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc \
+                    --enable-pic
+                  make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
                   make install
 
             - name: Stage Shared Libraries (Direct to Workspace)
@@ -515,24 +499,23 @@ jobs:
                   export PATH="/ucrt64/bin:/usr/bin:/usr/local/bin:$PATH"
                   export PKG_CONFIG_PATH="/ucrt64/lib/pkgconfig"
                   git clone --depth 1 --branch $FFMPEG_VERSION https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
+                  export PATH="/ucrt64/bin:/usr/bin:$PATH"
+
+                  export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+                  ccache --max-size=500M
+
+                  CORES=${NUMBER_OF_PROCESSORS:-4}
+                  echo "Building with $CORES threads..."
+
                   cd ffmpeg-src
                   ./configure \
                     --prefix=$PREFIX \
-                    --arch=x86_64 --target-os=mingw32 \
-                    --enable-shared --disable-static --enable-pic --enable-small \
-                    --extra-ldflags="-Wl,-Bdynamic,-lssp" \
-                    --disable-doc --disable-debug --disable-programs \
-                    --disable-avdevice --disable-avfilter --disable-swscale \
-                    --disable-everything \
-                    --enable-network --enable-zlib \
-                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
-                    --enable-decoder="$DECODERS" \
-                    --enable-demuxer="$DEMUXERS" \
-                    --enable-parser="$PARSERS" \
-                    --enable-bsf="$BSFS" \
-                    --enable-muxer="$MUXERS" \
-                    --enable-encoder="$ENCODERS"
-                  make -j$(nproc)
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc
+
+                  make -j$CORES
                   make install
 
             - name: Stage Shared Libraries (Direct to Workspace)
@@ -543,9 +526,32 @@ jobs:
                   find "$PREFIX" -name "avutil-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "avformat-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "avcodec-*.dll" -exec cp {} $STAGING/ \;
-                  find /ucrt64/bin -name "libssp-*.dll" -exec cp {} $STAGING/ \;
                   find "$PREFIX" -name "swresample-*.dll" -exec cp {} $STAGING/ \;
-                  find "$PREFIX" -name "*.pc" -exec cp {} $STAGING/ \; 2>/dev/null || true
+
+                  echo "Caching GCC UCRT64 Runtime library package..."
+                  pacman -Sw --noconfirm mingw-w64-ucrt-x86_64-gcc-libs
+                  PKG_FILE=$(ls /var/cache/pacman/pkg/mingw-w64-ucrt-x86_64-gcc-libs-*.pkg.tar.zst | head -n 1)
+                  if [ -n "$PKG_FILE" ]; then
+                    echo "Extracting package file: $PKG_FILE"
+                    tar -xf "$PKG_FILE"
+                    
+                    # Search inside the modern UCRT tree structure safely and copy directly to the workspace folder
+                    if [ -f "ucrt64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll in ucrt64! Copying to bundle..."
+                      cp ucrt64/bin/libssp-0.dll "$GITHUB_WORKSPACE/final-bundle/"
+                    elif [ -f "mingw64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll in mingw64! Copying to bundle..."
+                      cp mingw64/bin/libssp-0.dll "$GITHUB_WORKSPACE/final-bundle/"
+                    else
+                      echo "libssp-0.dll is missing in GCC 16+ package tree. Pulling standalone fallback for Bun..."
+                      curl -Lo "$GITHUB_WORKSPACE/final-bundle/libssp-0.dll" https://raw.githubusercontent.com/brechtsanders/winlibs_mingw/master/libssp-0.dll || \
+                      curl -Lo "$GITHUB_WORKSPACE/final-bundle/libssp-0.dll" https://github.com/vort/mpv-win32-deps/raw/master/shared/libssp-0.dll
+                    fi
+                  else
+                    echo "Error: Could not locate the downloaded pacman archive package file."
+                    exit 1
+                  fi
+
                   ls -lh $STAGING/
 
             # ==========================================

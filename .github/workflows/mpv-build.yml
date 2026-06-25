@@ -16,7 +16,8 @@ env:
     BSFS: aac_adtstoasc,extract_extradata,mp3_header_decompress
     MUXERS: mp4,mov,null,wav
     ENCODERS: aac,pcm_s16le
-    GLOBAL_PKG_CONFIG: ${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig:${{ github.workspace }}/libmpv/lib/pkgconfig:/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/opt/homebrew/lib/pkgconfig
+    GLOBAL_PKG_CONFIG: >
+        ${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig:${{ github.workspace }}/libmpv/lib/pkgconfig:/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/opt/homebrew/lib/pkgconfig
 
 jobs:
     build-linux:
@@ -184,10 +185,12 @@ jobs:
 
             - name: Build libplacebo
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
-                    https://github.com/haasn/libplacebo.git
+                  git clone --depth 1 https://github.com/haasn/libplacebo.git
                   cd libplacebo
+                  git fetch --tags --depth 1 origin refs/tags/${{ env.LIBPLACEBO_VERSION }}:refs/tags/${{ env.LIBPLACEBO_VERSION }}
+                  git checkout FETCH_HEAD
                   git submodule update --init --depth 1
+                  export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Ddemos=false -Dtests=false -Dbench=false \
@@ -197,19 +200,21 @@ jobs:
 
             - name: Build libass
               run: |
-                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
-                    https://github.com/libass/libass.git
+                  git clone --depth 1 https://github.com/libass/libass.git
                   cd libass
+                  git fetch --tags --depth 1 origin refs/tags/${{ env.LIBASS_VERSION }}:refs/tags/${{ env.LIBASS_VERSION }}
+                  git checkout FETCH_HEAD
+                  export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
-                    -Dfontconfig=disabled \
+                    -Dfontconfig=disabled -Drequire-system-font-provider=false \
                     --prefix ${{ env.OUTDIR }}
                   meson install -C build
 
             - name: Build libmpv (Shared)
               run: |
                   cd mpv
-                  PKG_CONFIG_PATH=${{ env.OUTDIR }}/lib/pkgconfig \
+                  PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                   meson setup build \
                     -Dcplayer=false -Dlibmpv=true \
                     -Ddefault_library=shared -Dbuildtype=release \

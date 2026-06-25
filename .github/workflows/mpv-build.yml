@@ -29,9 +29,9 @@ jobs:
                   ref: ${{ env.MPV_VERSION }}
                   path: mpv
 
-            - name: Setup libmpv ffmpeg cache
+            - name: Restore libmpv ffmpeg cache
               id: libmpv-ffmpeg-cache
-              uses: actions/cache@v4
+              uses: actions/cache/restore@v4
               with:
                   path: ${{env.FFMPEG_OUTDIR}}
                   key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
@@ -56,6 +56,13 @@ jobs:
                       --enable-protocol=file,pipe,cache,http,https,tcp,tls \
                       --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
                     make -j$(nproc) install
+
+            - name: Save libmpv ffmpeg cache
+              if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{env.FFMPEG_OUTDIR}}
+                  key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
 
             - name: Setup Python
               uses: actions/setup-python@v5

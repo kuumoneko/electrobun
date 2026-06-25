@@ -26,6 +26,11 @@ jobs:
             - name: Checkout Repository
               uses: actions/checkout@v4
 
+            - name: Disable Windows Defender
+              if: matrix.os == 'windows-latest'
+              run: Set-MpPreference -DisableRealtimeMonitoring $true
+              shell: powershell
+
             # ----------------------------------------------------------------
             # ENVIRONMENT SETUP
             # ----------------------------------------------------------------
@@ -89,9 +94,7 @@ jobs:
                     --enable-shared \
                     --disable-static \
                     --disable-programs \
-                    --disable-doc \
-                    --extra-cflags="-fstack-protector-all" \
-                    --extra-ldflags="-fstack-protector-all"
+                    --disable-doc
                   make -j$(nproc 2>/dev/null || echo 4)
                   make install
 
@@ -104,18 +107,31 @@ jobs:
                   mkdir -p final-bundle
 
                   if [ "${{ matrix.os }}" = "windows-latest" ]; then
-                    # Copy FFmpeg shared libraries (.dll files)
+                    # 1. Copy our compiled FFmpeg DLL files
                     cp dist/bin/*.dll final-bundle/ || true
                     
-                    # Manually extract the pre-built libssp-0.dll runtime from the compiler environment
-                    cp /mingw64/bin/libssp-0.dll final-bundle/ || echo "Warning: libssp-0.dll not found in standard MSYS2 path"
+                    # 2. Directly pull official pre-built gcc runtime libs to extract libssp-0.dll
+                    echo "Downloading official MSYS2 GCC libraries toolchain archive..."
+                    curl -Lo gcc-libs.tar.zst https://mirror.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-14.1.0-1-any.pkg.tar.zst
+                    
+                    echo "Extracting archive..."
+                    tar -xf gcc-libs.tar.zst
+                    
+                    if [ -f "mingw64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll! Copying to bundle..."
+                      cp mingw64/bin/libssp-0.dll final-bundle/
+                    else
+                      echo "Error: libssp-0.dll extraction failed from remote archive."
+                      exit 1
+                    fi
+                    
                   elif [ "${{ matrix.os }}" = "macos-latest" ]; then
                     cp dist/lib/*.dylib final-bundle/ || true
                   else
                     cp dist/lib/*.so* final-bundle/ || true
                   fi
 
-                  echo "--- Captured Binaries ---"
+                  echo "--- Final Captured Binaries ---"
                   ls -la final-bundle
 
             - name: Upload Build Artifacts

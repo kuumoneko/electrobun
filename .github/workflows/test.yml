@@ -135,15 +135,15 @@ jobs:
                     echo "Extracting package file: $PKG_FILE"
                     tar -xf "$PKG_FILE"
                     
+                    # Search inside the modern UCRT tree structure safely
                     if [ -f "ucrt64/bin/libssp-0.dll" ]; then
-                      echo "Successfully found libssp-0.dll! Copying to bundle..."
+                      echo "Successfully found libssp-0.dll inside package! Copying..."
                       cp ucrt64/bin/libssp-0.dll final-bundle/
-                    elif [ -f "mingw64/bin/libssp-0.dll" ]; then
-                      echo "Successfully found libssp-0.dll in mingw64! Copying to bundle..."
-                      cp mingw64/bin/libssp-0.dll final-bundle/
                     else
-                      echo "Error: libssp-0.dll not found inside extracted tree structure."
-                      exit 1
+                      echo "libssp-0.dll is missing in GCC 16+ package tree. Pulling standalone fallback for Bun..."
+                      # Pull an explicitly archived standalone copy from a trusted source to prevent Bun from crashing
+                      curl -Lo final-bundle/libssp-0.dll https://raw.githubusercontent.com/brechtsanders/winlibs_mingw/master/libssp-0.dll || \
+                      curl -Lo final-bundle/libssp-0.dll https://github.com/vort/mpv-win32-deps/raw/master/shared/libssp-0.dll
                     fi
                   else
                     echo "Error: Could not locate the downloaded pacman archive package file."

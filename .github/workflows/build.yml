@@ -75,7 +75,6 @@ jobs:
                   cp $PREFIX/lib/libavcodec.so* $STAGING/
                   cp $PREFIX/lib/libswresample.so* $STAGING/
                   cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
-                  cp /usr/lib/x86_64-linux-gnu/libssp.so* $STAGING/
 
             # ==========================================
             # STEP 2: BUILD NATIVE SMTC & FILEDIALOG

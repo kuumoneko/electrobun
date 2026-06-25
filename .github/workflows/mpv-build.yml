@@ -16,8 +16,7 @@ env:
     BSFS: aac_adtstoasc,extract_extradata,mp3_header_decompress
     MUXERS: mp4,mov,null,wav
     ENCODERS: aac,pcm_s16le
-    LINUX_GLOBAL_PKG_CONFIG: ${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig:${{github.workspace}}/libmpv/lib/pkgconfig:${{github.workspace}}/libmpv/lib/x86_64-linux-gnu/pkgconfig
-    MACOS_GLOBAL_PKG_CONFIG: :/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:${{github.workspace}}/libmpv/lib/pkgconfig:${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig
+    GLOBAL_PKG_CONFIG: ${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig:${{github.workspace}}/libmpv/lib/pkgconfig:${{github.workspace}}/libmpv/lib/x86_64-linux-gnu/pkgconfig
 
 jobs:
     build-linux:
@@ -48,7 +47,7 @@ jobs:
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                     cd ffmpeg-static
-                    export PKG_CONFIG_PATH="${{env.LINUX_GLOBAL_PKG_CONFIG}}"
+                    export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
                     ./configure \
                       --prefix=${{ env.FFMPEG_OUTDIR }} \
                       --enable-static --disable-shared --enable-pic --enable-small \
@@ -83,7 +82,7 @@ jobs:
                   git fetch --tags --depth 1 origin refs/tags/${{ env.LIBPLACEBO_VERSION }}:refs/tags/${{ env.LIBPLACEBO_VERSION }}
                   git checkout FETCH_HEAD
                   git submodule update --init --depth 1
-                  PKG_CONFIG_PATH="${{env.LINUX_GLOBAL_PKG_CONFIG}}" \
+                  PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Ddemos=false -Dtests=false -Dbench=false \
@@ -97,7 +96,7 @@ jobs:
                   cd libass
                   git fetch --tags --depth 1 origin refs/tags/${{ env.LIBASS_VERSION }}:refs/tags/${{ env.LIBASS_VERSION }}
                   git checkout FETCH_HEAD
-                  PKG_CONFIG_PATH="${{env.LINUX_GLOBAL_PKG_CONFIG}}" \
+                  PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Dfontconfig=disabled -Drequire-system-font-provider=false \
@@ -107,7 +106,7 @@ jobs:
             - name: Build libmpv
               run: |
                   cd mpv
-                    PKG_CONFIG_PATH="${{env.LINUX_GLOBAL_PKG_CONFIG}}" \
+                    PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                     meson setup build \
                       -Dcplayer=false -Dlibmpv=true \
                       -Ddefault_library=shared -Dbuildtype=release \
@@ -166,7 +165,7 @@ jobs:
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static
-                  export PKG_CONFIG_PATH="${{env.MACOS_GLOBAL_PKG_CONFIG}}"
+                  export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
                   ./configure \
                     --prefix=${{ env.FFMPEG_OUTDIR }} \
                     --enable-static --disable-shared --enable-pic --enable-small \
@@ -191,7 +190,7 @@ jobs:
                   git fetch --tags --depth 1 origin refs/tags/${{ env.LIBPLACEBO_VERSION }}:refs/tags/${{ env.LIBPLACEBO_VERSION }}
                   git checkout FETCH_HEAD
                   git submodule update --init --depth 1
-                  export PKG_CONFIG_PATH="${{env.MACOS_GLOBAL_PKG_CONFIG}}"
+                  export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Ddemos=false -Dtests=false -Dbench=false \
@@ -205,7 +204,7 @@ jobs:
                   cd libass
                   git fetch --tags --depth 1 origin refs/tags/${{ env.LIBASS_VERSION }}:refs/tags/${{ env.LIBASS_VERSION }}
                   git checkout FETCH_HEAD
-                  export PKG_CONFIG_PATH="${{env.MACOS_GLOBAL_PKG_CONFIG}}"
+                  export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
                   meson setup build \
                     -Ddefault_library=static -Dbuildtype=release \
                     -Dfontconfig=disabled -Drequire-system-font-provider=false \
@@ -215,7 +214,7 @@ jobs:
             - name: Build libmpv (Shared)
               run: |
                   cd mpv
-                  PKG_CONFIG_PATH="${{env.MACOS_GLOBAL_PKG_CONFIG}}" \
+                  PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}" \
                   meson setup build \
                     -Dcplayer=false -Dlibmpv=true \
                     -Ddefault_library=shared -Dbuildtype=release \

@@ -10,13 +10,20 @@ env:
     LIBASS_VERSION: 0.17.3
     FFMPEG_OUTDIR: ${{github.workspace}}/libmpv_ffmpeg
     OUTDIR: ${{github.workspace}}/libmpv
-    GLOBAL_PKG_CONFIG: ${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig:${{github.workspace}}/libmpv/lib/pkgconfig:${{github.workspace}}/libmpv/lib/x86_64-linux-gnu/pkgconfig
     DECODERS: aac,aac_latm,ac3,alac,ape,flac,opus,vorbis,wmav1,wmav2,wmapro,wmalossless,wmavoice,pcm_alaw,pcm_mulaw,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_u8,pcm_u16le,pcm_u16be,pcm_u24le,pcm_u24be,pcm_u32le,pcm_u32be,pcm_s8,dca,dsd_lsbf,dsd_msbf,dsd_lsbf_planar,dsd_msbf_planar,eac3,mlp,wavpack,tta,cook,shorten,tak,mp1,mp1float,mp2,mp2float,mp3,mp3float
     DEMUXERS: aac,ac3,aiff,ape,asf,au,flac,matroska,mov,mp3,mpc,mpc8,ogg,rm,wav,wv,dsf,tak,tta,image2,pcm_alaw,pcm_mulaw,flv
     PARSERS: aac,ac3,cook,dca,flac,mpegaudio,tak,vorbis
     BSFS: aac_adtstoasc,extract_extradata,mp3_header_decompress
     MUXERS: mp4,mov,null,wav
     ENCODERS: aac,pcm_s16le
+    GLOBAL_PKG_CONFIG: |
+        ${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig:\
+        ${{ github.workspace }}/libmpv/lib/pkgconfig:\
+        ${{ github.workspace }}/libmpv/lib/x86_64-linux-gnu/pkgconfig:\
+        /opt/homebrew/opt/openssl@3/lib/pkgconfig:\
+        /opt/homebrew/opt/curl/lib/pkgconfig:\
+        /opt/homebrew/opt/zlib/lib/pkgconfig:\
+        /opt/homebrew/lib/pkgconfig
 
 jobs:
     build-linux:
@@ -136,3 +143,109 @@ jobs:
               with:
                   name: libmpv-${{runner.os}}-${{runner.arch}}-${{env.MPV_VERSION}}
                   path: mpv/build/libmpv.so
+
+    build-macos:
+        runs-on: macos-latest
+        steps:
+            - name: Checkout MPV Core
+              uses: actions/checkout@v4
+              with:
+                  repository: mpv-player/mpv
+                  ref: ${{ env.MPV_VERSION }}
+                  path: mpv
+
+            - name: Restore libmpv ffmpeg cache
+              id: libmpv-ffmpeg-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{env.FFMPEG_OUTDIR}}
+                  key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
+
+            - name: Install deps
+              run: |
+                  brew install meson ninja pkg-config nasm cmake \
+                      openssl@3 zlib curl vulkan-headers fribidi harfbuzz
+
+            - name: Build Shared FFmpeg
+              if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
+              run: |
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
+                  cd ffmpeg-static
+                  export PKG_CONFIG_PATH="${{env.GLOBAL_PKG_CONFIG}}"
+                  ./configure \
+                    --prefix=${{ env.FFMPEG_OUTDIR }} \
+                    --enable-static --disable-shared --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice  --disable-everything \
+                    --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
+                  make -j$(sysctl -n hw.logicalcpu) install
+
+            - name: Save libmpv ffmpeg cache
+              if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{env.FFMPEG_OUTDIR}}
+                  key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
+
+            - name: Build libplacebo
+              run: |
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} \
+                    https://github.com/haasn/libplacebo.git
+                  cd libplacebo
+                  git submodule update --init --depth 1
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix ${{ env.OUTDIR }}
+                  meson install -C build
+
+            - name: Build libass
+              run: |
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} \
+                    https://github.com/libass/libass.git
+                  cd libass
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled \
+                    --prefix ${{ env.OUTDIR }}
+                  meson install -C build
+
+            - name: Build libmpv (Shared)
+              run: |
+                  cd mpv
+                  PKG_CONFIG_PATH=${{ env.OUTDIR }}/lib/pkgconfig \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dcoreaudio=enabled \
+                    -Dcocoa=disabled -Dswift-build=disabled \
+                    -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
+                    -Dmacos-touchbar=disabled \
+                    -Dgl=disabled -Dvulkan=disabled \
+                    -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled \
+                    -Dios-gl=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dalsa=disabled -Dpulse=disabled -Dpipewire=disabled \
+                    -Djack=disabled -Dopenal=disabled \
+                    -Dsdl2-video=disabled -Dsdl2-audio=disabled \
+                    -Dmanpage-build=disabled -Dtests=false \
+                    -Dc_args='-ffunction-sections -fdata-sections' \
+                     -Dc_link_args='-Wl,-dead_strip'
+                  meson compile -C build
+                  strip -S build/libmpv.dylib
+                  ls -lh build/libmpv.dylib
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-${{runner.os}}-${{runner.arch}}-${{env.MPV_VERSION}}
+                  path: mpv/build/libmpv.dylib

@@ -348,7 +348,7 @@ jobs:
                   FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
                   LIBMPV_PC="$(cygpath -u '${{ github.workspace }}/libmpv/lib/pkgconfig')"
                   cd mpv
-                  export PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}"
+                  export PKG_CONFIG_PATH="${FFMPEG_PC};${LIBMPV_PC}"
 
                   meson setup build \
                     -Dcplayer=false \

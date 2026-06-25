@@ -278,6 +278,8 @@ jobs:
                       mingw-w64-ucrt-x86_64-nasm
                       mingw-w64-ucrt-x86_64-fribidi
                       mingw-w64-ucrt-x86_64-harfbuzz
+                      git
+                      make
 
             - name: Build Static Audio-Only FFmpeg
               if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'

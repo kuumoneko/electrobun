@@ -48,7 +48,7 @@ jobs:
               run: |
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                     cd ffmpeg-static
-                    export PKG_CONFIG_PATH="${{env.MACOS_GLOBAL_PKG_CONFIG}}"
+                    export PKG_CONFIG_PATH="${{env.LINUX_GLOBAL_PKG_CONFIG}}"
                     ./configure \
                       --prefix=${{ env.FFMPEG_OUTDIR }} \
                       --enable-static --disable-shared --enable-pic --enable-small \

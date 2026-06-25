@@ -846,7 +846,7 @@ async function copyToDist() {
 			await $`cp ${stagingPath}/libavformat${libExt} dist/`;
 			await $`cp ${stagingPath}/libavcodec${libExt} dist/`;
 			await $`cp ${stagingPath}/libswresample${libExt} dist/`;
-			await $`cp ${stagingPath}/libssp${libExt} dist/`;
+			// await $`cp ${stagingPath}/libssp${libExt} dist/`;
 		} else {
 			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
 		}
@@ -911,7 +911,7 @@ async function copyToDist() {
 			await $`cp ${stagingPath}/libavformat.so dist/`;
 			await $`cp ${stagingPath}/libavcodec.so dist/`;
 			await $`cp ${stagingPath}/libswresample.so dist/`;
-			await $`cp ${stagingPath}/libssp.so dist/`;
+			// await $`cp ${stagingPath}/libssp.so dist/`;
 		} else {
 			console.warn("⚠️ Warning: Staging directory not found. FFmpeg binaries might be missing from bundle.");
 		}

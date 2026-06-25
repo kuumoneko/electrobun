@@ -1,0 +1,136 @@
+name: Build FFmpeg 8.x Shared Libraries
+
+on:
+    push:
+        branches: [main, master]
+    pull_request:
+        branches: [main, master]
+    workflow_dispatch:
+
+jobs:
+    build:
+        name: Build on ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: ubuntu-22.04
+                      artifact-name: ffmpeg-shared-linux
+                    - os: macos-latest
+                      artifact-name: ffmpeg-shared-macos
+                    - os: windows-latest
+                      artifact-name: ffmpeg-shared-windows
+
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v4
+
+            # ----------------------------------------------------------------
+            # ENVIRONMENT SETUP
+            # ----------------------------------------------------------------
+            - name: Install Dependencies (Linux)
+              if: matrix.os == 'ubuntu-22.04'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y build-essential yasm nasm pkg-config
+
+            - name: Install Dependencies (macOS)
+              if: matrix.os == 'macos-latest'
+              run: |
+                  brew install yasm nasm pkg-config
+
+            - name: Install Dependencies (Windows via MSYS2)
+              if: matrix.os == 'windows-latest'
+              uses: msys2/setup-msys2@v2
+              with:
+                  msystem: MINGW64
+                  update: true
+                  install: >-
+                      mingw-w64-x86_64-toolchain
+                      mingw-w64-x86_64-yasm
+                      mingw-w64-x86_64-nasm
+                      base-devel
+                      git
+
+            # ----------------------------------------------------------------
+            # FETCH SOURCE CODE
+            # ----------------------------------------------------------------
+            - name: Clone FFmpeg (Branch 8.0)
+              shell: bash
+              run: |
+                  git clone --depth 1 --branch release/8.0 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
+
+            # ----------------------------------------------------------------
+            # COMPILATION STEP
+            # ----------------------------------------------------------------
+            - name: Build FFmpeg (Unix-like)
+              if: matrix.os != 'windows-latest'
+              shell: bash
+              run: |
+                  cd ffmpeg-src
+                  ./configure \
+                    --prefix=$GITHUB_WORKSPACE/dist \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc \
+                    --enable-pic
+                  make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+                  make install
+
+            - name: Build FFmpeg (Windows MSYS2)
+              if: matrix.os == 'windows-latest'
+              shell: msys2 {0}
+              run: |
+                  cd ffmpeg-src
+                  ./configure \
+                    --prefix=$GITHUB_WORKSPACE/dist \
+                    --enable-shared \
+                    --disable-static \
+                    --disable-programs \
+                    --disable-doc
+                  make -j$(nproc 2>/dev/null || echo 4)
+                  make install
+
+            # ----------------------------------------------------------------
+            # ORGANIZE AND VERIFY ARTIFACTS
+            # ----------------------------------------------------------------
+            - name: Prepare Artifacts Bundle
+              shell: bash
+              run: |
+                  mkdir -p final-bundle
+
+                  if [ "${{ matrix.os }}" = "windows-latest" ]; then
+                    # 1. Copy our compiled FFmpeg DLL files
+                    cp dist/bin/*.dll final-bundle/ || true
+                    
+                    # 2. Directly pull official pre-built gcc runtime libs to extract libssp-0.dll
+                    echo "Downloading official MSYS2 GCC libraries toolchain archive..."
+                    curl -Lo gcc-libs.tar.zst https://mirror.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-14.1.0-1-any.pkg.tar.zst
+                    
+                    echo "Extracting archive..."
+                    tar -xf gcc-libs.tar.zst
+                    
+                    if [ -f "mingw64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll! Copying to bundle..."
+                      cp mingw64/bin/libssp-0.dll final-bundle/
+                    else
+                      echo "Error: libssp-0.dll extraction failed from remote archive."
+                      exit 1
+                    fi
+                    
+                  elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+                    cp dist/lib/*.dylib final-bundle/ || true
+                  else
+                    cp dist/lib/*.so* final-bundle/ || true
+                  fi
+
+                  echo "--- Final Captured Binaries ---"
+                  ls -la final-bundle
+
+            - name: Upload Build Artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ matrix.artifact-name }}
+                  path: final-bundle/

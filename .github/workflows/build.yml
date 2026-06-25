@@ -235,7 +235,6 @@ jobs:
                   if-no-files-found: error
 
     build-macos:
-        needs: build-linux
         runs-on: macos-latest
         steps:
             # ==========================================
@@ -282,7 +281,7 @@ jobs:
                   git clone --depth 1 --branch $FFMPEG_VERSION https://git.ffmpeg.org/ffmpeg.git ffmpeg-src
                   cd ffmpeg-src
                   ./configure \
-                    --prefix=$GITHUB_WORKSPACE/dist \
+                    --prefix=$PREFIX \
                     --enable-shared \
                     --disable-static \
                     --disable-programs \

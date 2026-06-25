@@ -273,7 +273,6 @@ jobs:
                   cache: false
                   install: >-
                       mingw-w64-ucrt-x86_64-toolchain
-                      mingw-w64-ucrt-x86_64-meson
                       mingw-w64-ucrt-x86_64-ninja
                       mingw-w64-ucrt-x86_64-pkgconf
                       mingw-w64-ucrt-x86_64-nasm
@@ -307,6 +306,16 @@ jobs:
               with:
                   path: ${{env.FFMPEG_OUTDIR}}
                   key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.x"
+
+            - name: Install deps and Meson
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install "meson>=0.63"
 
             - name: Build Dependency - libplacebo (Static)
               shell: msys2 {0}

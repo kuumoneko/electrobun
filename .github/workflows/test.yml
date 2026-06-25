@@ -109,14 +109,14 @@ jobs:
                   if [ "${{ matrix.os }}" = "windows-latest" ]; then
                     # 1. Copy our compiled FFmpeg DLL files
                     cp dist/bin/*.dll final-bundle/ || true
-                    
-                    # 2. Directly pull official pre-built gcc runtime libs to extract libssp-0.dll
+
+                    # 2. Pull from the official MSYS2 stable archive vault
                     echo "Downloading official MSYS2 GCC libraries toolchain archive..."
-                    curl -Lo gcc-libs.tar.zst https://mirror.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-14.1.0-1-any.pkg.tar.zst
-                    
+                    curl -Lo gcc-libs.tar.zst https://archive.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-14.1.0-1-any.pkg.tar.zst
+
                     echo "Extracting archive..."
                     tar -xf gcc-libs.tar.zst
-                    
+
                     if [ -f "mingw64/bin/libssp-0.dll" ]; then
                       echo "Successfully found libssp-0.dll! Copying to bundle..."
                       cp mingw64/bin/libssp-0.dll final-bundle/
@@ -124,7 +124,7 @@ jobs:
                       echo "Error: libssp-0.dll extraction failed from remote archive."
                       exit 1
                     fi
-                    
+
                   elif [ "${{ matrix.os }}" = "macos-latest" ]; then
                     cp dist/lib/*.dylib final-bundle/ || true
                   else

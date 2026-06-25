@@ -279,6 +279,7 @@ jobs:
                       mingw-w64-ucrt-x86_64-nasm
                       mingw-w64-ucrt-x86_64-fribidi
                       mingw-w64-ucrt-x86_64-harfbuzz
+                      mingw-w64-ucrt-x86_64-cmake
                       git
                       make
 

@@ -348,7 +348,8 @@ jobs:
                   FFMPEG_PC="$(cygpath -u '${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig')"
                   LIBMPV_PC="$(cygpath -u '${{ github.workspace }}/libmpv/lib/pkgconfig')"
                   cd mpv
-                  export PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}" \
+                  export PKG_CONFIG_PATH="${FFMPEG_PC}:${LIBMPV_PC}"
+
                   meson setup build \
                     -Dcplayer=false \
                     -Dlibmpv=true \
@@ -388,7 +389,7 @@ jobs:
                     -Dtests=false \
                     -Dc_args='-ffunction-sections -fdata-sections' \
                     -Dc_link_args='-Wl,--gc-sections -lstdc++'
-                    
+
                   meson compile -C build
                   strip build/libmpv-2.dll
                   ls -lh build/libmpv-2.dll

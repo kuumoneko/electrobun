@@ -16,10 +16,8 @@ env:
     BSFS: aac_adtstoasc,extract_extradata,mp3_header_decompress
     MUXERS: mp4,mov,null,wav
     ENCODERS: aac,pcm_s16le
-    LINUX_GLOBAL_PKG_CONFIG: >
-        ${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig:${{ github.workspace }}/libmpv/lib/pkgconfig
-    MACOS_GLOBAL_PKG_CONFIG: >
-        :/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:${{github.workspace}}/libmpv/lib/pkgconfig
+    LINUX_GLOBAL_PKG_CONFIG: ${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig:${{ github.workspace }}/libmpv/lib/pkgconfig
+    MACOS_GLOBAL_PKG_CONFIG: :/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:${{github.workspace}}/libmpv/lib/pkgconfig:${{ github.workspace }}/libmpv_ffmpeg/lib/pkgconfig
 
 jobs:
     build-linux:

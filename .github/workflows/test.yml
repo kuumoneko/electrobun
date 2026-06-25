@@ -119,40 +119,39 @@ jobs:
               if: matrix.os == 'windows-latest'
               shell: msys2 {0} # <--- This forces the environment to natively recognize pacman/tar
               run: |
-                  mkdir -p final-bundle
+                  # Create the folder directly in the root workspace
+                  mkdir -p "$GITHUB_WORKSPACE/final-bundle"
                     
-                  # 1. Copy our compiled FFmpeg DLL files from the global workspace
-                  cp "$GITHUB_WORKSPACE/dist/bin"/*.dll final-bundle/ || true
+                  # 1. Copy our compiled FFmpeg DLL files directly into it
+                  cp "$GITHUB_WORKSPACE/dist/bin"/*.dll "$GITHUB_WORKSPACE/final-bundle/" || true
                     
-                  # 2. Safely use pacman to download the archive file
-                  echo "Caching GCC Runtime library package..."
-                  pacman -Sw --noconfirm mingw-w64-x86_64-gcc-libs
+                  # 2. Get the correct UCRT64 runtime libs package via pacman
+                  echo "Caching GCC UCRT64 Runtime library package..."
+                  pacman -Sw --noconfirm mingw-w64-ucrt-x86_64-gcc-libs
                     
                   echo "Locating and extracting the downloaded archive package..."
-                  PKG_FILE=$(ls /var/cache/pacman/pkg/mingw-w64-x86_64-gcc-libs-*.pkg.tar.zst | head -n 1)
+                  PKG_FILE=$(ls /var/cache/pacman/pkg/mingw-w64-ucrt-x86_64-gcc-libs-*.pkg.tar.zst | head -n 1)
                     
                   if [ -n "$PKG_FILE" ]; then
                     echo "Extracting package file: $PKG_FILE"
                     tar -xf "$PKG_FILE"
                     
-                    # Search inside the modern UCRT tree structure safely
+                    # Search inside the modern UCRT tree structure safely and copy directly to the workspace folder
                     if [ -f "ucrt64/bin/libssp-0.dll" ]; then
-                      echo "Successfully found libssp-0.dll inside package! Copying..."
-                      cp ucrt64/bin/libssp-0.dll final-bundle/
+                      echo "Successfully found libssp-0.dll in ucrt64! Copying to bundle..."
+                      cp ucrt64/bin/libssp-0.dll "$GITHUB_WORKSPACE/final-bundle/"
+                    elif [ -f "mingw64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll in mingw64! Copying to bundle..."
+                      cp mingw64/bin/libssp-0.dll "$GITHUB_WORKSPACE/final-bundle/"
                     else
                       echo "libssp-0.dll is missing in GCC 16+ package tree. Pulling standalone fallback for Bun..."
-                      # Pull an explicitly archived standalone copy from a trusted source to prevent Bun from crashing
-                      curl -Lo final-bundle/libssp-0.dll https://raw.githubusercontent.com/brechtsanders/winlibs_mingw/master/libssp-0.dll || \
-                      curl -Lo final-bundle/libssp-0.dll https://github.com/vort/mpv-win32-deps/raw/master/shared/libssp-0.dll
+                      curl -Lo "$GITHUB_WORKSPACE/final-bundle/libssp-0.dll" https://raw.githubusercontent.com/brechtsanders/winlibs_mingw/master/libssp-0.dll || \
+                      curl -Lo "$GITHUB_WORKSPACE/final-bundle/libssp-0.dll" https://github.com/vort/mpv-win32-deps/raw/master/shared/libssp-0.dll
                     fi
                   else
                     echo "Error: Could not locate the downloaded pacman archive package file."
                     exit 1
                   fi
-                    
-                  # Move everything to the workspace final destination
-                  mkdir -p "$GITHUB_WORKSPACE/final-bundle"
-                  cp final-bundle/* "$GITHUB_WORKSPACE/final-bundle/"
                     
                   echo "--- Final Captured Binaries ---"
                   ls -la "$GITHUB_WORKSPACE/final-bundle"

@@ -285,7 +285,7 @@ jobs:
               if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.FFMPEG_OUTDIR }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static
                   ./configure \
@@ -309,7 +309,7 @@ jobs:
             - name: Build Dependency - libplacebo (Static)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.OUTDIR }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
                   git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
                   cd libplacebo
                   git submodule update --init --depth 1
@@ -323,7 +323,7 @@ jobs:
             - name: Build Dependency - libass (Static)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.OUTDIR }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
                   git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
                   cd libass
                   meson setup build \
@@ -335,7 +335,7 @@ jobs:
             - name: Build libmpv (Shared)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.OUTDIR }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
                   cd mpv
                   PKG_CONFIG_PATH=$MPVPREFIX_PATH/lib/pkgconfig \
                   meson setup build \

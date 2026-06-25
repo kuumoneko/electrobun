@@ -247,3 +247,114 @@ jobs:
               with:
                   name: libmpv-${{runner.os}}-${{runner.arch}}-${{env.MPV_VERSION}}
                   path: mpv/build/libmpv.dylib
+
+    build-windows:
+        runs-on: windows-latest
+        steps:
+            - name: Checkout MPV Core
+              uses: actions/checkout@v4
+              with:
+                  repository: mpv-player/mpv
+                  ref: ${{ env.MPV_VERSION }}
+                  path: mpv
+
+            - name: Restore libmpv ffmpeg cache
+              id: libmpv-ffmpeg-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{env.FFMPEG_OUTDIR}}
+                  key: libmpv-ffmpeg-${{runner.os}}-${{runner.arch}}-${{env.FFMPEG_VERSION}}
+
+            - name: Setup MSYS2 Environment
+              uses: msys2/setup-msys2@v2
+              with:
+                  msystem: UCRT64
+                  update: true
+                  install: >-
+                      mingw-w64-ucrt-x86_64-toolchain
+                      mingw-w64-ucrt-x86_64-meson
+                      mingw-w64-ucrt-x86_64-ninja
+                      mingw-w64-ucrt-x86_64-pkgconf
+                      mingw-w64-ucrt-x86_64-nasm
+                      mingw-w64-ucrt-x86_64-fribidi
+                      mingw-w64-ucrt-x86_64-harfbuzz
+
+            - name: Build Static Audio-Only FFmpeg
+              if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
+              shell: msys2 {0}
+              run: |
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.FFMPEG_OUTDIR }}')"
+                  git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
+                  cd ffmpeg-static
+                  ./configure \
+                    --prefix=$MPVPREFIX_PATH \
+                    --arch=x86_64 --target-os=mingw32 \
+                    --enable-static --disable-shared --enable-pic --enable-small \
+                    --disable-doc --disable-debug --disable-programs \
+                    --disable-avdevice  --disable-everything \
+                    --enable-avfilter --enable-swscale --enable-network --enable-zlib --enable-openssl \
+                    --enable-protocol=file,pipe,cache,http,https,tcp,tls \
+                    --enable-decoder="$DECODERS" --enable-demuxer="$DEMUXERS" --enable-parser="$PARSERS" --enable-bsf="$BSFS" --enable-muxer="$MUXERS" --enable-encoder="$ENCODERS"
+                  make -j$(nproc) install
+
+            - name: Build Dependency - libplacebo (Static)
+              shell: msys2 {0}
+              run: |
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.OUTDIR }}')"
+                  git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
+                  cd libplacebo
+                  git submodule update --init --depth 1
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Ddemos=false -Dtests=false -Dbench=false \
+                    -Dvulkan=disabled -Dopengl=disabled -Dd3d11=disabled \
+                    --prefix $MPVPREFIX_PATH
+                  meson install -C build
+
+            - name: Build Dependency - libass (Static)
+              shell: msys2 {0}
+              run: |
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.OUTDIR }}')"
+                  git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
+                  cd libass
+                  meson setup build \
+                    -Ddefault_library=static -Dbuildtype=release \
+                    -Dfontconfig=disabled \
+                    --prefix $MPVPREFIX_PATH
+                  meson install -C build
+
+            - name: Build libmpv (Shared)
+              shell: msys2 {0}
+              run: |
+                  MPVPREFIX_PATH="$(cygpath -u '${{ env.OUTDIR }}')"
+                  cd mpv
+                  PKG_CONFIG_PATH=$MPVPREFIX_PATH/lib/pkgconfig \
+                  meson setup build \
+                    -Dcplayer=false -Dlibmpv=true \
+                    -Ddefault_library=shared -Dbuildtype=release \
+                    -Dbuild-date=false -Dgpl=false \
+                    -Dlua=disabled -Djavascript=disabled -Dcplugins=disabled \
+                    -Dwasapi=enabled -Dwin32-smtc=disabled \
+                    -Dgl=disabled -Dvulkan=disabled -Degl=disabled \
+                    -Degl-angle=disabled -Dshaderc=disabled -Dspirv-cross=disabled \
+                    -Dd3d11=disabled -Ddirect3d=disabled \
+                    -Dcuda-hwaccel=disabled -Dd3d-hwaccel=disabled \
+                    -Dlcms2=disabled -Dzimg=disabled -Djpeg=disabled \
+                    -Dlibarchive=disabled -Drubberband=disabled \
+                    -Dcdda=disabled -Ddvdnav=disabled -Dlibbluray=disabled \
+                    -Duchardet=disabled -Dvapoursynth=disabled \
+                    -Diconv=disabled -Dzlib=disabled \
+                    -Dcaca=disabled \
+                    -Dmanpage-build=disabled -Dtests=false \
+                    -Dc_args='-ffunction-sections -fdata-sections' \
+                     -Dc_link_args='-Wl,--gc-sections -lstdc++'
+                  meson compile -C build
+                  strip build/libmpv-2.dll
+                  ls -lh build/libmpv-2.dll
+                  cp build/libmpv-2.dll build/libmpv.dll
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-${{runner.os}}-${{runner.arch}}-${{env.MPV_VERSION}}
+                  path: mpv/build/libmpv.dll

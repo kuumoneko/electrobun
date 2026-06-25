@@ -1,8 +1,6 @@
 name: Build Shared FFmpeg n8.1
 
 on:
-    push:
-        branches: [main, master]
     workflow_dispatch:
 
 jobs:

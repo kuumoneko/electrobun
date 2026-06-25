@@ -1,10 +1,6 @@
 name: Build FFmpeg 8.x Shared Libraries
 
 on:
-    push:
-        branches: [main, master]
-    pull_request:
-        branches: [main, master]
     workflow_dispatch:
 
 jobs:

@@ -1,8 +1,6 @@
 name: Build All Platforms
 on:
     workflow_dispatch:
-    push:
-        branches: [main]
 
 env:
     FFMPEG_VERSION: n8.1

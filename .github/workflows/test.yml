@@ -47,10 +47,11 @@ jobs:
               with:
                   msystem: UCRT64
                   update: true
+                  path-type: inherit
                   install: >-
-                      mingw-w64-x86_64-toolchain
-                      mingw-w64-x86_64-yasm
-                      mingw-w64-x86_64-nasm
+                      mingw-w64-ucrt-x86_64-toolchain
+                      mingw-w64-ucrt-x86_64-yasm
+                      mingw-w64-ucrt-x86_64-nasm
                       base-devel
                       git
 
@@ -84,6 +85,8 @@ jobs:
               if: matrix.os == 'windows-latest'
               shell: msys2 {0}
               run: |
+                  export PATH="/ucrt64/bin:/usr/bin:$PATH"
+
                   cd ffmpeg-src
                   ./configure \
                     --prefix=$GITHUB_WORKSPACE/dist \
@@ -117,8 +120,11 @@ jobs:
                     echo "Extracting package file: $PKG_FILE"
                     tar -xf "$PKG_FILE"
                     
-                    if [ -f "mingw64/bin/libssp-0.dll" ]; then
+                    if [ -f "ucrt64/bin/libssp-0.dll" ]; then
                       echo "Successfully found libssp-0.dll! Copying to bundle..."
+                      cp ucrt64/bin/libssp-0.dll final-bundle/
+                    elif [ -f "mingw64/bin/libssp-0.dll" ]; then
+                      echo "Successfully found libssp-0.dll in mingw64! Copying to bundle..."
                       cp mingw64/bin/libssp-0.dll final-bundle/
                     else
                       echo "Error: libssp-0.dll not found inside extracted tree structure."

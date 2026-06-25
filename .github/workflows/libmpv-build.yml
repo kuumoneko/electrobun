@@ -1,0 +1,116 @@
+name: Build Stripped libmpv for Bun FFI
+
+on:
+    workflow_dispatch:
+
+jobs:
+    # --- WINDOWS BUILD (Cross-compiled from Linux using mpv-winbuild) ---
+    build-windows:
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
+                    meson ninja-build python3-pip git nasm yasm uuid-dev checkinstall
+
+            - name: Clone mpv-winbuild-cmake
+              run: git clone https://github.com/shinchiro/mpv-winbuild-cmake.git
+
+            - name: Configure and Build minimal libmpv
+              run: |
+                  cd mpv-winbuild-cmake
+                  mkdir build && cd build
+                  # Configure custom FFmpeg options to isolate audio only
+                  echo "CONFOPTS=--disable-videos --disable-vdpau --disable-vaapi --enable-wasapi" >> ../settings
+                  cmake -DTARGET_ARCH=x86_64-w64-mingw32 -G Ninja ..
+                  ninja libmpv
+
+            - name: Upload Windows Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-windows
+                  path: mpv-winbuild-cmake/build/mpv-target/libmpv-2.dll
+
+    # --- MACOS BUILD (Native compilation) ---
+    build-macos:
+        runs-on: macos-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup Build Tools
+              run: brew install meson ninja nasm pkg-config
+
+            - name: Build Audio-Only FFmpeg
+              run: |
+                  git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure --enable-shared --disable-static --disable-programs \
+                    --disable-doc --disable-everything \
+                    --enable-protocol=file,http,https,tcp,tls \
+                    --enable-demuxer=mov,matroska,mp3,aac,flac,ogg,hls,dash \
+                    --enable-decoder=aac,opus,mp3,flac,vorbis \
+                    --enable-parser=aac,opus,mpegaudio,flac \
+                    --enable-securetransport
+                  make -j$(sysctl -n hw.ncpu)
+                  sudo make install
+
+            - name: Build libmpv
+              run: |
+                  git clone --depth 1 https://github.com/mpv-player/mpv.git
+                  cd mpv
+                  meson setup build -Dlibmpv=true -Dcplayer=false -Dvideo-osd=false \
+                    --buildtype=release
+                  ninja -C build
+
+            - name: Upload macOS Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-macos
+                  path: mpv/build/libmpv.dylib
+
+    # --- LINUX BUILD (Native compilation) ---
+    build-linux:
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y meson ninja-build libasound2-dev libpulse-dev \
+                    libgnutls28-dev nasm yasm pkg-config git
+
+            - name: Build Audio-Only FFmpeg
+              run: |
+                  git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+                  cd ffmpeg
+                  ./configure --enable-shared --disable-static --disable-programs \
+                    --disable-doc --disable-everything \
+                    --enable-protocol=file,http,https,tcp,tls \
+                    --enable-demuxer=mov,matroska,mp3,aac,flac,ogg,hls,dash \
+                    --enable-decoder=aac,opus,mp3,flac,vorbis \
+                    --enable-parser=aac,opus,mpegaudio,flac \
+                    --enable-gnutls
+                  make -j$(nproc)
+                  sudo make install
+
+            - name: Build libmpv
+              run: |
+                  git clone --depth 1 https://github.com/mpv-player/mpv.git
+                  cd mpv
+                  export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+                  meson setup build -Dlibmpv=true -Dcplayer=false -Dvideo-osd=false \
+                    -Dalsa=enabled -Dpulse=enabled --buildtype=release
+                  ninja -C build
+
+            - name: Upload Linux Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: libmpv-linux
+                  path: mpv/build/libmpv.so

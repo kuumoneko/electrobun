@@ -40,7 +40,7 @@ jobs:
               run: |
                   sudo apt-get update &&\
                   sudo apt-get install -y build-essential cmake pkg-config nasm git \
-                  libasound2-dev libcurl4-openssl-dev libfribidi-dev
+                  libasound2-dev libcurl4-openssl-dev libfribidi-dev libharfbuzz-dev ninja-build
 
             - name: Build libmpv FFmpeg
               if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
@@ -64,7 +64,6 @@ jobs:
 
             - name: Install deps and Meson
               run: |
-                  sudo apt-get install -y ninja-build
                   python -m pip install --upgrade pip
                   pip install "meson>=0.63"
 

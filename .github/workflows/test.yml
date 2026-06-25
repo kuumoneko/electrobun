@@ -46,7 +46,7 @@ jobs:
               uses: msys2/setup-msys2@v2
               with:
                   msystem: UCRT64
-                  update: true
+                  update: false
                   path-type: inherit
                   install: >-
                       mingw-w64-ucrt-x86_64-toolchain
@@ -80,12 +80,26 @@ jobs:
                     --enable-pic
                   make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
                   make install
+            - name: Setup Compiler Cache (Windows MSYS2)
+              if: matrix.os == 'windows-latest'
+              uses: actions/cache@v4
+              with:
+                  path: .ccache
+                  key: ${{ runner.os }}-ffmpeg-ccache-${{ github.sha }}
+                  restore-keys: |
+                      ${{ runner.os }}-ffmpeg-ccache-
 
             - name: Build FFmpeg (Windows MSYS2)
               if: matrix.os == 'windows-latest'
               shell: msys2 {0}
               run: |
                   export PATH="/ucrt64/bin:/usr/bin:$PATH"
+
+                  export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+                  ccache --max-size=500M
+
+                  CORES=${NUMBER_OF_PROCESSORS:-4}
+                  echo "Building with $CORES threads..."
 
                   cd ffmpeg-src
                   ./configure \
@@ -94,6 +108,7 @@ jobs:
                     --disable-static \
                     --disable-programs \
                     --disable-doc
+                    --cc="ccache gcc"
                   make -j$(nproc 2>/dev/null || echo 4)
                   make install
 

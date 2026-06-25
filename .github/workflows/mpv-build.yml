@@ -270,6 +270,7 @@ jobs:
               with:
                   msystem: UCRT64
                   update: true
+                  cache: false
                   install: >-
                       mingw-w64-ucrt-x86_64-toolchain
                       mingw-w64-ucrt-x86_64-meson
@@ -285,7 +286,7 @@ jobs:
               if: steps.libmpv-ffmpeg-cache.outputs.cache-hit != 'true'
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig')"
                   git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} https://git.ffmpeg.org/ffmpeg.git ffmpeg-static
                   cd ffmpeg-static
                   ./configure \
@@ -309,7 +310,7 @@ jobs:
             - name: Build Dependency - libplacebo (Static)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig')"
                   git clone --depth 1 --branch ${{ env.LIBPLACEBO_VERSION }} https://github.com/haasn/libplacebo.git
                   cd libplacebo
                   git submodule update --init --depth 1
@@ -323,7 +324,7 @@ jobs:
             - name: Build Dependency - libass (Static)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig')"
                   git clone --depth 1 --branch ${{ env.LIBASS_VERSION }} https://github.com/libass/libass.git
                   cd libass
                   meson setup build \
@@ -335,7 +336,7 @@ jobs:
             - name: Build libmpv (Shared)
               shell: msys2 {0}
               run: |
-                  MPVPREFIX_PATH="$(cygpath -u '${{ env.GLOBAL_PKG_CONFIG }}')"
+                  MPVPREFIX_PATH="$(cygpath -u '${{github.workspace}}/libmpv_ffmpeg/lib/pkgconfig')"
                   cd mpv
                   PKG_CONFIG_PATH=$MPVPREFIX_PATH/lib/pkgconfig \
                   meson setup build \

@@ -40,7 +40,6 @@ jobs:
                      libvulkan-dev libfreetype-dev libfribidi-dev libharfbuzz-dev \
                      libfontconfig-dev libgtk-3-dev libsoup2.4-dev libwebkit2gtk-4.0-dev \
                      libayatana-appindicator3-dev librsvg2-dev libfuse2 libpango1.0-dev
-                  sudo ln -sf /usr/lib/x86_64-linux-gnu/libssp.so.0 /usr/lib/x86_64-linux-gnu/libssp.so
 
               # ==========================================
               # STEP 1: BUILD SHARED FFMPEG
@@ -298,7 +297,6 @@ jobs:
                   cp $PREFIX/lib/libavcodec*.dylib $STAGING/
                   cp $PREFIX/lib/libswresample*.dylib $STAGING/
                   cp $PREFIX/lib/pkgconfig/*.pc $STAGING/
-                  find /usr/local/lib/gcc -name "libssp*.dylib*" -exec cp {} $STAGING/ \;
                   ls -lh $STAGING/
 
             # ==========================================
@@ -447,7 +445,7 @@ jobs:
                   if-no-files-found: error
 
     build-windows:
-        needs: build-macos
+        needs: [build-macos, build-linux]
         runs-on: windows-latest
         steps:
             # ==========================================

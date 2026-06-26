@@ -1,0 +1,47 @@
+name: Build aumid
+
+on:
+    workflow_dispatch:
+
+jobs:
+    build-windows:
+        runs-on: windows-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup aumid cache
+              id: aumid-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: aumid
+                  key: aumid-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/win/aumid.cpp')}}
+
+            - name: Setup MSVC
+              if: steps.aumid-cache.outputs.cache-hit != 'true'
+              uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Build aumid
+              if: steps.aumid-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package\src\smtc\win
+                  mkdir build
+
+                  cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fobuild/aumid.obj aumid.cpp
+                  link /DLL /OUT:build/aumid.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib /IMPLIB:build/aumid.lib build/aumid.obj
+
+                  mkdir -p ../../../../aumid
+                  cp build/aumid.dll ../../../../aumid/aumid.dll
+
+            - name: Save aumid cache
+              if: steps.aumid-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: aumid
+                  key: aumid-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/win/aumid.cpp')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: aumid-${{runner.os}}-${{runner.arch}}
+                  path: aumid/aumid.dll

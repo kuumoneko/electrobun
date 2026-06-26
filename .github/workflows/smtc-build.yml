@@ -31,7 +31,7 @@ jobs:
 
                   g++ -shared -fPIC -o build/libsmtc.so -I. smtc.cpp $(pkg-config --cflags --libs dbus-1) -std=c++11 -O2 -Wl,-soname,libsmtc.so
                   strip build/libsmtc.so
-                  cp build/libsmtc.so ../../../../smtc/libsmtc.so
+                  cp build/libsmtc.so ../../../smtc/libsmtc.so
 
             - name: Save SMTC cache
               if: steps.smtc-cache.outputs.cache-hit != 'true'

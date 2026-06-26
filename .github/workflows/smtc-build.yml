@@ -114,7 +114,7 @@ jobs:
                   cl /nologo /LD /EHsc /std:c++17 /O2 ..\smtc.cpp /link /out:smtc.dll windowsapp.lib
 
                   mkdir -p ../../../../../smtc
-                  cp build/smtc.dll ../../../../../smtc/smtc.dll
+                  cp smtc.dll ../../../../../smtc/smtc.dll
 
             - name: Save SMTC cache
               if: steps.smtc-cache.outputs.cache-hit != 'true'

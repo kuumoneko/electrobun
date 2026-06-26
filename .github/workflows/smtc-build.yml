@@ -1,0 +1,47 @@
+name: Build SMTC
+
+on:
+    workflow_dispatch:
+
+jobs:
+    build-linux:
+        runs-on: ubuntu-22.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup SMTC cache
+              id: smtc-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: smtc
+                  key: smtc-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/linux/smtc.cpp')}}
+
+            - name: Install deps
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libdbus-1-dev pkg-config build-essential
+
+            - name: Build SMTC
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package/src/smtc/linux
+                  mkdir -p build
+
+                  g++ -shared -fPIC -o build/libsmtc.so -I. smtc.cpp $(pkg-config --cflags --libs dbus-1) -std=c++11 -O2 -Wl,-soname,libsmtc.so
+                  strip build/libsmtc.so
+                  cp build/libsmtc.so ../../../../smtc/libsmtc.so
+
+            - name: Save SMTC cache
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: smtc
+                  key: smtc-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/linux/smtc.cpp')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-${{runner.os}}-${{runner.arch}}
+                  path: smtc/libsmtc.so

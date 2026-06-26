@@ -109,7 +109,7 @@ jobs:
               if: steps.smtc-cache.outputs.cache-hit != 'true'
               run: |
                   cd package\src\smtc\win
-                  if not exist build mkdir build
+                  mkdir build
                   cd build  
                   cl /nologo /LD /EHsc /std:c++17 /O2 ..\smtc.cpp /link /out:smtc.dll windowsapp.lib
 

@@ -29,11 +29,11 @@ jobs:
                   cd package/src/smtc/linux
                   mkdir -p build
 
-                  g++ -shared -fPIC -o build/libsmtc.so -I. smtc.cpp $(pkg-config --cflags --libs dbus-1) -std=c++11 -O2 -Wl,-soname,libsmtc.so
-                  strip build/libsmtc.so
+                  g++ -shared -fPIC -o build/smtc.so -I. smtc.cpp $(pkg-config --cflags --libs dbus-1) -std=c++11 -O2 -Wl,-soname,smtc.so
+                  strip build/smtc.so
 
                   mkdir -p ../../../../smtc
-                  cp build/libsmtc.so ../../../../smtc/libsmtc.so
+                  cp build/smtc.so ../../../../smtc/smtc.so
 
             - name: Save SMTC cache
               if: steps.smtc-cache.outputs.cache-hit != 'true'
@@ -46,4 +46,85 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: smtc-${{runner.os}}-${{runner.arch}}
-                  path: smtc/libsmtc.so
+                  path: smtc/smtc.so
+
+    build-macos:
+        runs-on: macos-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup SMTC cache
+              id: smtc-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: smtc
+                  key: smtc-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/macos/smtc.mm')}}
+
+            - name: Build SMTC
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package/src/smtc/macos
+                  mkdir -p build
+
+                  clang++ -shared -fPIC -o build/smtc.dylib smtc.mm \
+                    -framework MediaPlayer -framework AppKit -framework Cocoa \
+                    -std=c++11 -O2 -ObjC++
+                  strip -S build/smtc.dylib
+
+                  mkdir -p ../../../../smtc
+                  cp build/smtc.dylib ../../../../smtc/smtc.dylib
+
+            - name: Save SMTC cache
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: smtc
+                  key: smtc-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/macos/smtc.mm')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-${{runner.os}}-${{runner.arch}}
+                  path: smtc/smtc.dylib
+
+    build-windows:
+        runs-on: windows-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup SMTC cache
+              id: smtc-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: smtc
+                  key: smtc-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/win/smtc.cpp')}}
+
+            - name: Setup MSVC
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Build SMTC
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package\src\smtc\win
+                  if not exist build mkdir build
+                  cd build  
+                  cl /nologo /LD /EHsc /std:c++17 /O2 ..\smtc.cpp /link /out:smtc.dll windowsapp.lib
+
+                  mkdir -p ../../../../../smtc
+                  cp build/smtc.dll ../../../../../smtc/smtc.dll
+
+            - name: Save SMTC cache
+              if: steps.smtc-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: smtc
+                  key: smtc-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/win/smtc.cpp')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: smtc-${{runner.os}}-${{runner.arch}}
+                  path: smtc/smtc.dll

@@ -1,0 +1,131 @@
+name: Build filedialog
+
+on:
+    workflow_dispatch:
+
+jobs:
+    build-linux:
+        runs-on: ubuntu-22.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup filedialog cache
+              id: filedialog-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: filedialog
+                  key: filedialog-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/linux/filedialog.cpp' , 'package/src/smtc/linux/tinyfiledialogs/tinyfiledialogs.c' , 'package/src/smtc/linux/tinyfiledialogs/tinyfiledialogs.h')}}
+
+            - name: Install deps
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libdbus-1-dev pkg-config build-essential
+
+            - name: Build filedialog
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package/src/smtc/linux
+                  mkdir -p build
+
+                  gcc -shared -fPIC -o build/libfiledialog.so -I. filedialog.cpp tinyfiledialogs/tinyfiledialogs.c -lX11 -O2 -D_GNU_SOURCE
+                  strip build/libfiledialog.so
+
+                  mkdir -p ../../../../filedialog
+                  cp build/filedialog.so ../../../../filedialog/filedialog.so
+
+            - name: Save filedialog cache
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: filedialog
+                  key: filedialog-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/linux/filedialog.cpp' , 'package/src/smtc/linux/tinyfiledialogs/tinyfiledialogs.c' , 'package/src/smtc/linux/tinyfiledialogs/tinyfiledialogs.h')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: filedialog-${{runner.os}}-${{runner.arch}}
+                  path: filedialog/filedialog.so
+
+    build-macos:
+        runs-on: macos-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup filedialog cache
+              id: filedialog-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: filedialog
+                  key: filedialog-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/macos/filedialog.mm')}}
+
+            - name: Build SMTC
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package/src/smtc/macos
+                  mkdir -p build
+
+                  clang++ -shared -fPIC -o build/filedialog.dylib filedialog.mm \
+                    -framework MediaPlayer -framework AppKit -framework Cocoa \
+                    -std=c++11 -O2 -ObjC++
+                  strip -S build/filedialog.dylib
+
+                  mkdir -p ../../../../filedialog
+                  cp build/filedialog.dylib ../../../../filedialog/filedialog.dylib
+
+            - name: Save SMTC cache
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: filedialog
+                  key: filedialog-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/macos/filedialog.mm')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: filedialog-${{runner.os}}-${{runner.arch}}
+                  path: filedialog/filedialog.dylib
+
+    build-windows:
+        runs-on: windows-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup filedialog cache
+              id: filedialog-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: filedialog
+                  key: filedialog-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/win/filedialog.cpp')}}
+
+            - name: Setup MSVC
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Build filedialog
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              run: |
+                  cd package\src\smtc\win
+                  mkdir build
+
+                  cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fobuild/filedialog.obj filedialog.cpp
+                  link /DLL /OUT:build/filedialog.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib /IMPLIB:build/filedialog.lib build/filedialog.obj
+
+                  mkdir -p ../../../../filedialog
+                  cp build/filedialog.dll ../../../../filedialog/filedialog.dll
+
+            - name: Save filedialog cache
+              if: steps.filedialog-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: filedialog
+                  key: filedialog-${{runner.os}}-${{runner.arch}}-${{hashFiles('package/src/smtc/win/filedialog.cpp')}}
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: filedialog-${{runner.os}}-${{runner.arch}}
+                  path: filedialog/filedialog.dll

@@ -29,8 +29,8 @@ jobs:
                   cd package/src/smtc/linux
                   mkdir -p build
 
-                  gcc -shared -fPIC -o build/libfiledialog.so -I. filedialog.cpp tinyfiledialogs/tinyfiledialogs.c -lX11 -O2 -D_GNU_SOURCE
-                  strip build/libfiledialog.so
+                  gcc -shared -fPIC -o build/filedialog.so -I. filedialog.cpp tinyfiledialogs/tinyfiledialogs.c -lX11 -O2 -D_GNU_SOURCE
+                  strip build/filedialog.so
 
                   mkdir -p ../../../../filedialog
                   cp build/filedialog.so ../../../../filedialog/filedialog.so

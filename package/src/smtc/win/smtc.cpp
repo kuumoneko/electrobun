@@ -15,7 +15,6 @@
 #include <string>
 #include <vector>
 #include <queue>
-#include <coroutine>
 
 using namespace winrt;
 using namespace Windows::Media;

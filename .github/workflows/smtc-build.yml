@@ -107,14 +107,17 @@ jobs:
 
             - name: Build SMTC
               if: steps.smtc-cache.outputs.cache-hit != 'true'
+              #   await runMsvcCommand(`cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fosmtc/build/smtc.obj smtc/smtc.cpp`);
+              # await runMsvcCommand(`link /DLL /OUT:smtc/build/smtc.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib runtimeobject.lib mfplat.lib mf.lib /IMPLIB:smtc/build/smtc.lib smtc/build/smtc.obj`);
               run: |
                   cd package\src\smtc\win
                   mkdir build
-                  cd build  
-                  cl /nologo /LD /EHsc /std:c++20 /O2 ..\smtc.cpp /link /out:smtc.dll windowsapp.lib
+                  cl /c /EHsc /std:c++20 /MT /D_USRDLL /D_WINDLL /Fobuild/smtc.obj smtc.cpp
+                  #   cl /nologo /LD /EHsc /std:c++20 /O2 ..\smtc.cpp /link /out:smtc.dll windowsapp.lib
+                  link /DLL /OUT:build/smtc.dll user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib runtimeobject.lib mfplat.lib mf.lib /IMPLIB:build/smtc.lib build/smtc.obj
 
-                  mkdir -p ../../../../../smtc
-                  cp smtc.dll ../../../../../smtc/smtc.dll
+                  mkdir -p ../../../../smtc
+                  cp build/smtc.dll ../../../../smtc/smtc.dll
 
             - name: Save SMTC cache
               if: steps.smtc-cache.outputs.cache-hit != 'true'

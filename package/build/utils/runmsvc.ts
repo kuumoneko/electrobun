@@ -1,4 +1,4 @@
-import { getOS } from ".";
+import { getOS } from "./os";
 import { join } from "node:path"
 import { existsSync } from "node:fs";
 import { $ } from "bun"

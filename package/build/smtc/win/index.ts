@@ -22,4 +22,7 @@ export default async function build_win_smtc(path: string) {
             await runMsvcCommand(`link /DLL /OUT:"${dllPath}" user32.lib ole32.lib oleaut32.lib shell32.lib kernel32.lib runtimeobject.lib mfplat.lib mf.lib /IMPLIB:"${libPath}" "${objPath}"`);
         } catch (e) { console.error(e); }
     }
+    else {
+        console.log("SMTC is unchanged, Skipping...")
+    }
 }

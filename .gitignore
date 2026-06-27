@@ -26,3 +26,4 @@ settings.local.json
 /package/src/extractor/zig-out
 /package/src/launcher/zig-out
 /test
+/package/bun.lock

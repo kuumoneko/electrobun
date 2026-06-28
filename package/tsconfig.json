@@ -1,31 +1,32 @@
 {
     "compilerOptions": {
-      // Enable latest features
-      "lib": ["ESNext", "DOM"],
-      "target": "ESNext",
-      "module": "ESNext",
-      "moduleDetection": "force",
-      "jsx": "react-jsx",
-      "allowJs": true,
-      "resolveJsonModule": true,
+        // Enable latest features
+        "lib": ["ESNext", "DOM"],
+        "target": "ESNext",
+        "module": "ESNext",
+        "moduleDetection": "force",
+        "jsx": "react-jsx",
+        "allowJs": true,
+        "resolveJsonModule": true,
 
-      // Bundler mode
-      "moduleResolution": "bundler",
-      "allowImportingTsExtensions": true,
-      "verbatimModuleSyntax": true,
-      "noEmit": true,
+        // Bundler mode
+        "moduleResolution": "bundler",
+        "allowImportingTsExtensions": true,
+        "verbatimModuleSyntax": true,
+        "noEmit": true,
 
-      // Best practices
-      "strict": true,
-      "skipLibCheck": true,
-      "noFallthroughCasesInSwitch": true,
+        // Best practices
+        "strict": true,
+        "skipLibCheck": true,
+        "noFallthroughCasesInSwitch": true,
 
-      // Some stricter flags
-      "noUnusedLocals": true,
-      "noUnusedParameters": true,
-      "noPropertyAccessFromIndexSignature": true,
-      "noUncheckedIndexedAccess": true
+        // Some stricter flags
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noUncheckedIndexedAccess": true,
+        "types": ["bun"]
     },
-    "include": ["src/**/*"],
-    "exclude": ["node_modules", "dist", "vendors", "build", "src/tests"]
-  }
+    "include": ["src/**/*", "build/**/*"],
+    "exclude": ["node_modules", "dist", "vendors", "src/tests"]
+}

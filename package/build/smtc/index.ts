@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { getOS } from "../utils/os";
+import { getOS } from "../../share/os";
 import build_linux_smtc from "./linux";
 import build_macos_smtc from "./macos";
 import build_win_smtc from "./win";

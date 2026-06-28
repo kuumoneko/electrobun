@@ -1,4 +1,4 @@
-import { checkPackage, installPackage, isNewer } from "../../utils/os";
+import { checkPackage, installPackage, isNewer } from "../../../share/os";
 import { join, resolve } from "node:path"
 import { spawnSync } from 'bun';
 import { existsSync, mkdirSync } from "node:fs";

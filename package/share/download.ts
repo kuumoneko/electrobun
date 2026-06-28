@@ -2,19 +2,10 @@ import { mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import fs from "node:fs/promises";
 
-async function fallbackDownload(url: string, outPath: string) {
-    const response = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-    });
-    if (!response.ok) throw new Error(`Failed to download: ${response.statusText}`);
-
-    await Bun.write(outPath, response);
-    console.log(`Successfully saved to: ${outPath}`);
-}
-
 export default async function download(url: string, outPath: string, connections: number = 4) {
     outPath = resolve(outPath);
     const dirPath = dirname(outPath);
+
     rmSync(dirPath, { recursive: true, force: true });
     mkdirSync(dirPath, { recursive: true });
 
@@ -29,10 +20,10 @@ export default async function download(url: string, outPath: string, connections
 
     if (!contentLength || (acceptRanges !== "bytes" && headResponse.status !== 206)) {
         console.warn("Multi-connection or Range headers not supported. Falling back to single-stream.");
-        return fallbackDownload(url, outPath);
+        connections = 1;
     }
 
-    const totalBytes = parseInt(contentLength, 10);
+    const totalBytes = parseInt(contentLength ?? "0", 10);
     const chunkSize = Math.ceil(totalBytes / connections);
 
     console.log(`Total size: ${(totalBytes / 1024 / 1024).toFixed(2)} MB`);

@@ -37,7 +37,7 @@ export function getLibExt(): ".dll" | ".so" | ".dylib" {
 }
 
 export function isGithubActions(): boolean {
-    const GA = process.env.GITHUB_ACTIONS;
+    const GA = process.env["GITHUB_ACTIONS"];
     if (!GA) return false;
     if (typeof GA === "string") return GA.toLocaleLowerCase().trim() === "true";
     return GA;

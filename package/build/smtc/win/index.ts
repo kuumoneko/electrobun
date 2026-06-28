@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { isNewer } from '../../utils/os';
-import runMsvcCommand from '../../utils/runmsvc';
+import { isNewer } from '../../../share/os';
+import runMsvcCommand from '../../../share/runmsvc';
 
 /**
  * 

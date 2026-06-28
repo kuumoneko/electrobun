@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { getOS } from "../utils/os";
+import { getOS } from "../../share/os";
 import build_linux_filedialog from "./linux";
 import build_macos_filedialog from "./macos";
 import build_win_filedialog from "./win";

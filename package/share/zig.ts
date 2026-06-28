@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { getArch, getBinExt, getOS, isNewer } from "./os";
 import { join, resolve } from "node:path"
 import download from "./download";
@@ -34,7 +34,7 @@ async function addZigToPath(targetDir: string) {
 
     if (OS === "win") {
         try {
-            const currentPath = process.env.PATH || "";
+            const currentPath = process.env["PATH"] || "";
 
             if (currentPath.includes(targetDir)) {
                 console.log("Zig directory is already present in your Windows PATH.");
@@ -48,7 +48,7 @@ async function addZigToPath(targetDir: string) {
             console.error("Failed to update Windows registry path:", err);
         }
     } else {
-        const isZsh = process.env.SHELL?.includes("zsh");
+        const isZsh = process.env["SHELL"]?.includes("zsh");
         const shellFile = isZsh
             ? join(homedir(), ".zshrc")
             : join(homedir(), ".bashrc");
@@ -108,6 +108,7 @@ export async function installZig(path: string) {
         zigTempPath = join(zigTempPath, zigName);
     }
     await addZigToPath(join(zigTempPath, zigFileName));
+    rmSync(zigTempPath, { recursive: true });
 }
 
 /**
@@ -127,7 +128,6 @@ export async function runZigbuild(path: string, buildName: string, args: string[
         throw new Error(`${buildName} source dir not found at ${sourceDir}`);
     }
     const Source = join(sourceDir, "main.zig");
-    const buildSource = join(sourceDir, "build.zig");
     const outSource = join(sourceDir, "zig-out", "bin", `${buildName}${getBinExt()}`);
 
     if (!existsSync(Source)) {

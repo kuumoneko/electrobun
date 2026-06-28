@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path"
 import { spawnSync } from 'bun';
 import { existsSync, mkdirSync } from "node:fs";
-import { isNewer } from "../../utils/os";
+import { isNewer } from "../../../share/os";
 /**
  * 
  * @param path 

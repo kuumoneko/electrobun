@@ -8,6 +8,7 @@ import {
 import { mkdir, rename, rm } from "node:fs/promises";
 import downloadAndExtract from "./download";
 import { $ } from "bun";
+import { getLibExt } from "../../share/os";
 
 let iconPath = "", tempIcoPath = "";
 
@@ -77,22 +78,18 @@ function getPlatformPaths(
 		BUN_BINARY: join(platformDistDir, "bun") + binExt,
 		LAUNCHER_DEV: join(platformDistDir, "electrobun") + binExt,
 		LAUNCHER_RELEASE: join(platformDistDir, "launcher") + binExt,
-		NATIVE_WRAPPER_MACOS: join(platformDistDir, "libNativeWrapper.dylib"),
-		NATIVE_WRAPPER_WIN: join(platformDistDir, "libNativeWrapper.dll"),
-		NATIVE_WRAPPER_LINUX: join(platformDistDir, "libNativeWrapper.so"),
+		NATIVE_WRAPPER: join(platformDistDir, `libNativeWrapper${getLibExt()}`),
 		WEBVIEW2LOADER_WIN: join(platformDistDir, "WebView2Loader.dll"),
-		LIBMPV: join(platformDistDir, "libmpv.dll"),
-		// MPV: join(platformDistDir, "mpv") + binExt,
-		// TEST: join(platformDistDir, "test.dll"),
-		SMTC: join(platformDistDir, "smtc.dll"),
+		LIBMPV: join(platformDistDir, `libmpv${getLibExt()}`),
+		SMTC: join(platformDistDir, `smtc${getLibExt()}`),
 
-		AVFORMAT: join(platformDistDir, "avformat-62.dll"),
-		AVCODEC: join(platformDistDir, "avcodec-62.dll"),
-		AVUTIL: join(platformDistDir, "avutil-60.dll"),
-		LIBSSP: join(platformDistDir, targetOS === "win" ? "libssp-0.dll" : targetOS === "macos" ? "libssp.dylib" : "libssp.so"),
-		SWREXAMPLE: join(platformDistDir, "swresample-6.dll"),
-		AUMID: join(platformDistDir, "aumid.dll"),
-		FILE_DIALOG: join(platformDistDir, "filedialog.dll"),
+		AVFORMAT: join(platformDistDir, `avformat-62${getLibExt()}`),
+		AVCODEC: join(platformDistDir, `avcodec-62${getLibExt()}`),
+		AVUTIL: join(platformDistDir, `avutil-60${getLibExt()}`),
+		LIBSSP: join(platformDistDir, targetOS === "win" ? `libssp-0.dll` : ""),
+		SWREXAMPLE: join(platformDistDir, `swresample-6${getLibExt()}`),
+		AUMID: join(platformDistDir, `aumid${getLibExt()}`),
+		FILE_DIALOG: join(platformDistDir, `filedialog${getLibExt()}`),
 		BSPATCH: join(platformDistDir, "bspatch") + binExt,
 		EXTRACTOR: join(platformDistDir, "extractor") + binExt,
 		BSDIFF: join(platformDistDir, "bsdiff") + binExt,
@@ -119,7 +116,7 @@ async function ensureCoreDependencies(
 		platformPaths.BUN_BINARY,
 		platformPaths.BSDIFF,
 		platformPaths.BSPATCH,
-		platformPaths.NATIVE_WRAPPER_WIN
+		platformPaths.NATIVE_WRAPPER
 	];
 
 	// Check shared files (main.js should be in shared dist/)
@@ -480,7 +477,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 			join(appBundleMacOSPath, "bun") + targetBinExt;
 		const destFolder2 = dirname(bunBinaryDestInBundlePath);
 		// native wrapper dynamic library
-		const nativeWrapperMacosSource = targetPaths.NATIVE_WRAPPER_WIN;
+		const nativeWrapperMacosSource = targetPaths.NATIVE_WRAPPER;
 		const nativeWrapperMacosDestination = join(
 			appBundleMacOSPath,
 			"libNativeWrapper.dll",

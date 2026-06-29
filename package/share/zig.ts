@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { getArch, getBinExt, getOS, isNewer } from "./os";
 import { join, resolve } from "node:path"
 import download from "./download";
-import { decompress } from "./compress";
+import { decompress } from "./7z";
 import { homedir } from "node:os";
 import { $ } from "bun";
 import { config } from "dotenv"

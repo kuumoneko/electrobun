@@ -1,5 +1,4 @@
-import { join, dirname, basename, resolve } from "node:path";
-import { OS, ARCH } from "../shared/platform";
+import { join, dirname, basename } from "node:path";
 import { BUN_VERSION } from "../shared/bun-version";
 import { getAppFileName } from "../shared/naming";
 import { mkdir, rename, rm } from "node:fs/promises";
@@ -7,28 +6,11 @@ import download from "../../share/download";
 import { compress, decompress } from "../../share/7z";
 import { getBunDownloadInfo } from "../../share/bun-url";
 import createPatch from "./patch";
+import { embedIcon, embedMetadata } from "./rcedit";
 import { $ } from "bun";
-import { getLibExt } from "../../share/os";
+import { getArch, getBinExt, getLibExt, getOS } from "../../share/os";
 
 let iconPath = "", tempIcoPath = "";
-
-// embed icon to exe
-async function spawnRcedit(exePath: string, iconPath: string): Promise<void> {
-    const rceditPath = join(
-        dirname(process.execPath),
-        "rcedit-x64.exe",
-    );
-    if (!(await Bun.file(rceditPath).exists())) {
-        throw new Error(
-            `rcedit binary not found at ${rceditPath}. ` +
-            `Make sure 'rcedit' is installed in your project's node_modules.`,
-        );
-    }
-    if (!(await Bun.file(iconPath).exists())) {
-        throw new Error(`Icon path not found at ${iconPath}`)
-    }
-    await Bun.spawn([`${rceditPath}`, `${exePath}`, "--set-icon", `${iconPath}`], { stdout: "inherit", stderr: "inherit" }).exited;
-}
 
 const projectRoot = process.cwd();
 
@@ -53,11 +35,35 @@ async function resolveElectrobunDir(): Promise<string> {
 const ELECTROBUN_DEP_PATH = await resolveElectrobunDir();
 const ELECTROBUN_CACHE_PATH = join(dirname(ELECTROBUN_DEP_PATH), ".electrobun-cache");
 
+function getSharedFFmpegPath(targetOS: "macos" | 'win' | 'linux', targetArch: 'arm64' | 'x64') {
+    const platformDistDir = join(
+        ELECTROBUN_DEP_PATH,
+        `dist-${targetOS}-${targetArch}`,
+    );
+    if (targetOS === "win") {
+        return {
+            AVFORMAT: join(platformDistDir, "avformat-62.dll"),
+            AVCODEC: join(platformDistDir, "avcodec-62.dll"),
+            AVUTIL: join(platformDistDir, "avutil-60.dll"),
+            LIBSSP: join(platformDistDir, "libssp-0.dll"),
+            SWREXAMPLE: join(platformDistDir, "swresample-6.dll"),
+        }
+    }
+    else {
+        return {
+            AVFORMAT: join(platformDistDir, `avformat${getLibExt()}`),
+            AVCODEC: join(platformDistDir, `avcodec${getLibExt()}`),
+            AVUTIL: join(platformDistDir, `avutil${getLibExt()}`),
+            SWREXAMPLE: join(platformDistDir, `swresample${getLibExt()}`),
+        }
+    }
+}
+
 function getPlatformPaths(
     targetOS: "macos" | "win" | "linux",
     targetArch: "arm64" | "x64",
 ) {
-    const binExt = targetOS === "win" ? ".exe" : "";
+    const binExt = getBinExt();
     const platformDistDir = join(
         ELECTROBUN_DEP_PATH,
         `dist-${targetOS}-${targetArch}`,
@@ -74,11 +80,7 @@ function getPlatformPaths(
         LIBMPV: join(platformDistDir, `libmpv${getLibExt()}`),
         SMTC: join(platformDistDir, `smtc${getLibExt()}`),
 
-        AVFORMAT: join(platformDistDir, `avformat-62${getLibExt()}`),
-        AVCODEC: join(platformDistDir, `avcodec-62${getLibExt()}`),
-        AVUTIL: join(platformDistDir, `avutil-60${getLibExt()}`),
-        LIBSSP: join(platformDistDir, targetOS === "win" ? `libssp-0.dll` : ""),
-        SWREXAMPLE: join(platformDistDir, `swresample-6${getLibExt()}`),
+        ...getSharedFFmpegPath(targetOS, targetArch),
         AUMID: join(platformDistDir, `aumid${getLibExt()}`),
         FILE_DIALOG: join(platformDistDir, `filedialog${getLibExt()}`),
         BSPATCH: join(platformDistDir, "bspatch") + binExt,
@@ -96,8 +98,8 @@ async function ensureCoreDependencies(
     targetArch?: "arm64" | "x64",
 ) {
     // Use provided target platform or default to host platform
-    const platformOS = targetOS || OS;
-    const platformArch = targetArch || ARCH;
+    const platformOS = targetOS || getOS();
+    const platformArch = targetArch || getArch();
 
     // Get platform-specific paths
     const platformPaths = getPlatformPaths(platformOS, platformArch);
@@ -412,7 +414,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
     ) {
         const start = new Date().getTime();
         // Determine current platform as default target
-        const currentTarget = { os: OS, arch: ARCH };
+        const currentTarget = { os: getOS(), arch: getArch() };
 
         // Set up build variables
         const targetOS = currentTarget.os;
@@ -611,7 +613,11 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
             Bun.write(avformatDestination, Bun.file(avformatSource)),
             Bun.write(avcodecDestination, Bun.file(avcodecSource)),
             Bun.write(avutilDestination, Bun.file(avutilSource)),
-            Bun.write(libsspDestination, Bun.file(libsspSource)),
+            new Promise(async (resolve) => {
+                if (libsspSource)
+                    await Bun.write(libsspDestination, Bun.file(libsspSource));
+                resolve;
+            }),
             Bun.write(swresampleDestination, Bun.file(swresampleSource)),
             // build bun main process
             new Promise((resolve) => {
@@ -628,7 +634,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                             console.error("failed to build", bunSource);
                             printBuildLogs(buildResult.logs);
                         }
-                        resolve("")
+                        resolve;
                     })
             }),
             // build views
@@ -661,7 +667,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                         continue;
                     }
                 }
-                resolve("");
+                resolve;
             }),
             new Promise(async (resolve) => {
                 await Promise.all(Object.keys(config.build.copy as any).map(relSource => {
@@ -670,7 +676,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                     const destFolder = dirname(destination);
                     $`mkdir -p ${dirname(source)} && mkdir -p ${destFolder} && cp -R ${source} ${destination}`.catch(console.error)
                 }))
-                resolve("")
+                resolve;
             }),
         ])
 
@@ -760,10 +766,9 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
             console.log("Embedding icon...");
             await Promise.all([
                 copyIcons(appBundleFolderResourcesPath, config.build.win.icon ?? ""),
-                spawnRcedit(bunCliLauncherDestination, iconPath).then(() => console.log(`Successfully embedded icon into launcher.exe`)),
-                spawnRcedit(bunBinaryDestInBundlePath, iconPath).then(() => console.log(`Successfully embedded icon into bun.exe`)),
-                // spawnRcedit(mpvlibDestination, iconPath).then(() => console.log(`Successfully embedded icon into mpv.exe`))
-                spawnRcedit(libmpvDestination, iconPath).then(() => console.log(`Successfully embedded icon into libmpv.dll`))
+                embedIcon(bunCliLauncherDestination, iconPath).then(() => console.log(`Successfully embedded icon into launcher.exe`)),
+                embedIcon(bunBinaryDestInBundlePath, iconPath).then(() => console.log(`Successfully embedded icon into bun.exe`)),
+                embedIcon(libmpvDestination, iconPath).then(() => console.log(`Successfully embedded icon into libmpv.dll`))
             ])
             console.log("After embedding icon:", new Date().getTime() - start);
         }
@@ -774,29 +779,11 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                 `${appFileName}.tar`,
             );
 
-            const rceditPath = join(
-                dirname(process.execPath),
-                "rcedit-x64.exe",
-            );
-            if (!(await Bun.file(rceditPath).exists())) {
-                throw new Error(
-                    `rcedit binary not found at ${rceditPath}. ` +
-                    `Make sure 'rcedit' is installed in your project's node_modules.`,
-                );
-            }
-
-
-            await Bun.spawn([rceditPath,
-                bunCliLauncherDestination,
-                "--set-version-string", "ProductName", config.app.name,
-                "--set-version-string", "FileDescription", config.app.name,
-                "--set-version-string", "CompanyName", config.app.identifier,
-                "--set-version-string", "ApplicationCompany", config.app.identifier,
-                "--set-version-string", "InternalFilename", config.app.name,
-                "--set-file-version", config.app.version,
-                "--set-product-version", config.app.version,
-                "--set-version-string", "LegalCopyright", "©2026 Electrobun. All rights reserved."
-            ]).exited;
+            await embedMetadata(bunCliLauncherDestination, {
+                name: config.app.name,
+                identifier: config.app.identifier,
+                version: config.app.version,
+            });
 
             // Tar the app bundle for all platforms
             await compress(join(buildFolder, appFileName), tarPath, "tar")
@@ -807,41 +794,16 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                 const tarball = Bun.file(tarPath);
                 console.log("compressing tarball...");
                 if (tarball.size > 0) {
-                    const zstdPath = targetPaths.ZSTD;
-                    if (!(await Bun.file(zstdPath).exists())) {
-                        throw new Error(`zig-zstd not found at ${zstdPath}`);
-                    }
-                    const compressResult = Bun.spawnSync(
-                        [
-                            zstdPath,
-                            "compress",
-                            "-i",
-                            tarPath,
-                            "-o",
-                            compressedTarPath,
-                            "--threads",
-                            "max", "-l", "3"
-                        ],
-                        {
-                            cwd: buildFolder,
-                            stdout: "inherit",
-                            stderr: "inherit",
-                        },
-                    );
-                    if (!compressResult.success) {
-                        throw new Error(
-                            `zig-zstd compress failed with exit code ${compressResult.exitCode}`,
-                        );
-                    }
+                    await compress(tarPath, compressedTarPath, "zst");
                 }
                 async function buildSelfExtractor() {
                     const zigArgs =
-                        OS === "win"
+                        currentTarget.os === "win"
                             ? ["-Dtarget=x86_64-windows", "-Dcpu=native"]
-                            : ARCH === "x64"
+                            : currentTarget.arch === "x64"
                                 ? ["-Dcpu=native"]
                                 : [];
-                    const extractorPath = "electrobun/package/src/extractor";
+                    const extractorPath = join(projectRoot, "electrobun", "package", "src", "extractor");
                     if (buildEnvironment === "dev") {
                         await $`zig build ${zigArgs}`.cwd(extractorPath);
                     } else if (buildEnvironment === "stable") {
@@ -851,17 +813,13 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                 console.info("Building Extractor...")
                 const now = new Date().getTime();
                 // console.log(config.build.win.icon)
-                // await Bun.write(resolve("electrobun/package/src/extractor", "app.rc"), `id ICON "favicon.ico"`);
-                await copyIcons(resolve("electrobun/package/src/extractor"), config.build.win.icon ?? "");
+                // await Bun.write(join(projectRoot, "electrobun", "package", "src", "extractor", "app.rc"), `id ICON "favicon.ico"`);
+                await copyIcons(join(projectRoot, "electrobun", "package", "src", "extractor"), config.build.win.icon ?? "");
                 await buildSelfExtractor()
                 console.log(`Building: ${new Date().getTime() - now} ms`);
 
-
-
-
-
                 const payloadPath = compressedTarPath;
-                const exePath = resolve(`electrobun/package/src/extractor/zig-out/bin/extractor${OS === "win" ? ".exe" : ""}`);
+                const exePath = join(projectRoot, "electrobun", "package", "src", "extractor", "zig-out", "bin", `extractor${getBinExt()}`);
                 const outputPath = join(buildFolder, appFileName + "-Setup.exe");
                 try {
                     // Read the EXE and the Payload into memory
@@ -905,7 +863,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
                 buildFolder,
                 bsdiffPath: targetPaths.BSDIFF,
                 tarPath,
-                os: OS,
+                os: currentTarget.os,
             });
             if (patchFilePath) {
                 artifactsToUpload.push(patchFilePath);
@@ -945,8 +903,8 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
             const updateJsonContent = JSON.stringify({
                 version: config.app.version,
                 hash: hash.toString(),
-                platform: OS,
-                arch: ARCH,
+                platform: currentTarget.os,
+                arch: currentTarget.arch,
             });
 
             // update.json with platform prefix for flat naming structure
@@ -976,10 +934,10 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
     // Call once per CLI session — returns a restore function.
     async function takeoverForeground(): Promise<() => void> {
         let restoreFn = () => { };
-        if (OS === "win") return restoreFn;
+        if (getOS() === "win") return restoreFn;
         try {
             const { dlopen, ptr } = await import("bun:ffi");
-            const libName = OS === "macos" ? "libSystem.B.dylib" : "libc.so.6";
+            const libName = getOS() === "macos" ? "libSystem.B.dylib" : "libc.so.6";
             const libc = dlopen(libName, {
                 open: { args: ["ptr", "i32"], returns: "i32" },
                 close: { args: ["i32"], returns: "i32" },
@@ -1036,7 +994,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
 
         const buildEnvironment = "dev";
         const bundleFileName = getAppFileName(config.app.name, buildEnvironment);
-        const buildSubFolder = `${buildEnvironment}-${OS}-${ARCH}`;
+        const buildSubFolder = `${buildEnvironment}-${getOS()}-${getArch()}`;
         const buildFolder = join(
             projectRoot,
             config.build.buildFolder,
@@ -1049,6 +1007,7 @@ const copyIcons = async (IconOutPath: string, icon: string = "") => {
         let bundleExecPath: string;
         // @ts-ignore
         let _bundleResourcesPath: string;
+        const OS = getOS()
         if (OS === "macos") {
             bundleExecPath = join(buildFolder, bundleFileName, "Contents", "MacOS");
             _bundleResourcesPath = join(
